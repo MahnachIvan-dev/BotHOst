@@ -1,231 +1,389 @@
-# 🤖 BotHost — Хостинг Telegram-ботов
+# 🚀 BotHost Runner
 
-Полноценная платформа для хостинга Telegram-ботов с оплатой через **Telegram Gifts** (подарки).
+Runner-сервер для BotHost — реально запускает Python-ботов пользователей в изолированных Docker-контейнерах + Telegram-бот для управления и отслеживания подарков.
 
----
+## 📦 Что внутри
 
-## ⚡ БЫСТРАЯ УСТАНОВКА
-
-**4 сервиса: GitHub + Vercel + Supabase (БД) + Railway (runner)**  
-**Стоимость:** $5/месяц (только runner, всё остальное бесплатно!)  
-**Время:** ~30 минут
-
-### 📚 Документация:
-
-| Файл | Описание |
-|------|----------|
-| **[DEPLOYMENT.md](./DEPLOYMENT.md)** | 🎯 **ГЛАВНАЯ ИНСТРУКЦИЯ** — полный гайд по деплою и подключению |
-| [QUICKSTART.md](./QUICKSTART.md) | Быстрый старт (16 шагов) |
-| На сайте: [/quickstart](https://your-app.vercel.app/quickstart) | Визуальная инструкция |
-
-### 🤖 Архитектура:
-
-```
-GitHub ($0) + Vercel ($0, сайт) + Supabase ($0, БД) + Railway ($5, runner)
-```
-
-- **Telegram-бот** — интерфейс пользователя (оплата Stars, загрузка, управление)
-- **Сайт (Vercel)** — сервер (API, админка, фронтенд)
-- **БД (Supabase)** — бесплатная PostgreSQL 500 MB
-- **Runner (Railway)** — запуск Python-ботов в Docker
-- **Оплата** — только через **Telegram Stars** (звёзды идут владельцу)
-
----
-
-## ✨ Возможности
-
-- 🚀 **Загрузка Python-ботов** через сайт или Telegram
-- 🎁 **Оплата через Telegram Gifts** — дарите подарки владельцу, слоты активируются автоматически
-- 🎟️ **Промокоды** на бесплатные слоты
-- 🔒 **Безопасность** — токены не указываются в коде
-- 🛡️ **Валидация кода** — проверка, что это именно Telegram-бот
-- 🐳 **Изоляция** — каждый бот в Docker-контейнере
-- 📊 **Админ-панель** на сайте и в Telegram
-- 💳 **Тарифы**: неделя (15⭐), 2 недели (25⭐), месяц (50⭐)
+- **`runner.py`** — FastAPI-сервер, принимает команды от сайта, запускает ботов в Docker
+- **`bot.py`** — Telegram-бот: интерфейс пользователя + отслеживание подарков владельцу
 
 ## 🏗️ Архитектура
 
-### Сайт (этот репозиторий)
-- **Next.js 16** с App Router
-- **PostgreSQL** через Drizzle ORM
-- **Tailwind CSS** для стилей
-- Деплой на **Vercel**
+```
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│   Vercel        │ ────> │   Runner        │ ────> │ Docker          │
+│   (Сайт + API)  │       │ (FastAPI + TBot)│       │ (Боты user'ов)  │
+└─────────────────┘       └─────────────────┘       └─────────────────┘
+         │                         │
+         │                         └───> Telegram (отслеживает подарки)
+         └───> PostgreSQL (БД)
+```
 
-### Telegram-бот (отдельный runner-сервер)
-- **Python** с библиотекой **aiogram 3.x**
-- Запускается на **Railway / Render / VPS**
-- Код бота доступен на странице `/bot-setup`
+## 💰 Оплата через подарки
 
-## 📋 Тарифы
+Пользователь дарит подарок **владельцу** через Telegram → владелец получает подарок → runner-сервер это видит через Userbot API → активирует слот.
 
-| План | Длительность | Цена | Слотов |
-|------|--------------|------|--------|
-| Неделя | 7 дней | 15 ⭐ | 1 |
-| 2 недели | 14 дней | 25 ⭐ | 1 |
-| Месяц | 30 дней | 50 ⭐ | 1 |
+### Стоимость подарка → План:
+- 🎁 **15+ ⭐** → слот на **1 неделю**
+- 🎁 **25+ ⭐** → слот на **2 недели**
+- 🎁 **50+ ⭐** → слот на **1 месяц**
 
-## 🚀 Быстрый старт
+## 🚀 Деплой на Railway (рекомендуется)
 
-### 📚 ПОЛНАЯ ИНСТРУКЦИЯ ДЛЯ НОВИЧКОВ
+### Шаг 1: Подготовка
 
-Если вы впервые деплоите проект — откройте **[INSTALL.md](./INSTALL.md)**
+1. Форкните репозиторий BotHost
+2. Зарегистрируйтесь на [railway.app](https://railway.app)
+3. Установите Railway CLI: `npm i -g @railway/cli`
 
-Там пошагово расписано:
-- Где регистрироваться
-- Что скачивать
-- Куда что вставлять
-- Как проверить что всё работает
-
-**Время:** ~2 часа  
-**Стоимость:** ~$5/месяц
-
----
-
-### ⚡ Быстрая установка (для опытных)
+### Шаг 2: Деплой сайта на Vercel
 
 ```bash
-git clone https://github.com/your-username/bothost.git
 cd bothost
-npm install
-
-# Создайте .env
-DATABASE_URL=postgresql://user:password@localhost:5432/bothost
-
-# Примените схему
-npx drizzle-kit push
-
-# Запустите
-npm run dev
+vercel --prod
 ```
 
-Откройте http://localhost:3000
+Добавьте переменные:
+```
+DATABASE_URL=postgresql://...
+RUNNER_URL=https://your-runner.railway.app
+RUNNER_SECRET=your_secret_here
+ADMIN_TELEGRAM_ID=123456789
+```
 
-## 🌐 Деплой на Vercel
+### Шаг 3: Деплой Runner на Railway
 
-Подробная инструкция на странице `/vercel-deploy` или в [документации](./DEPLOY.md).
+```bash
+cd runner
+railway init
+railway up
+```
 
-### Кратко:
-
-1. Создайте проект на Vercel
-2. Подключите GitHub репозиторий
-3. Добавьте PostgreSQL (Vercel Postgres / Neon / Supabase)
-4. Настройте переменные окружения:
-   ```
-   DATABASE_URL=postgresql://...
-   TELEGRAM_BOT_TOKEN=...
-   ADMIN_TELEGRAM_ID=...
-   ```
-5. Примените схему: `npx drizzle-kit push`
-6. Готово!
-
-## 🤖 Настройка Telegram-бота
-
-1. Создайте бота через [@BotFather](https://t.me/BotFather)
-2. Получите токен
-3. Скопируйте код бота со страницы `/bot-setup`
-4. Запустите на runner-сервере (Railway / Render / VPS)
-5. Настройте webhook или polling
-
-### Переменные окружения для бота:
-
-```env
-BOT_TOKEN=1234567890:ABCdefGhI...
-WEBSITE_URL=https://bothost.vercel.app
+Добавьте переменные в Railway:
+```
+BOT_TOKEN=1234567890:ABCdefGhIjKlMnOpQrStUvWxYz
 OWNER_TELEGRAM_ID=123456789
+OWNER_PHONE=+79991234567
+OWNER_API_ID=12345678
+OWNER_API_HASH=abcdef1234567890abcdef1234567890
+WEBSITE_URL=https://bothost.vercel.app
+RUNNER_SECRET=your_secret_here
+PORT=8000
 ```
 
-## 📁 Структура проекта
+### Шаг 4: Получение Telegram API credentials
 
+Для Userbot (отслеживание подарков):
+
+1. Зайдите на https://my.telegram.org
+2. Войдите с номером владельца
+3. **API development tools** → Create application
+4. Скопируйте `api_id` и `api_hash`
+5. Добавьте в переменные:
+   - `OWNER_API_ID`
+   - `OWNER_API_HASH`
+   - `OWNER_PHONE`
+
+### Шаг 5: Настройка Docker
+
+На Railway Docker уже доступен. Для VPS:
+
+```bash
+# Установка Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sh get-docker.sh
+
+# Запуск runner с docker.sock
+docker build -t bothost-runner .
+docker run -d \
+  --name runner \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -p 8000:8000 \
+  --env-file .env \
+  bothost-runner
 ```
-src/
-├── app/
-│   ├── page.tsx              # Главная страница
-│   ├── upload/page.tsx       # Загрузка бота
-│   ├── dashboard/page.tsx    # Личный кабинет
-│   ├── admin/page.tsx        # Админ-панель
-│   ├── bot-setup/page.tsx    # Код Telegram-бота
-│   ├── vercel-deploy/page.tsx # Инструкция по деплою
-│   ├── buy/[planId]/page.tsx # Страница оплаты
-│   └── api/
-│       ├── bots/             # API для ботов
-│       ├── subscriptions/    # API для подписок
-│       ├── promo/            # API для промокодов
-│       ├── admin/            # API админки
-│       └── health/           # Healthcheck
-├── db/
-│   ├── schema.ts             # Схема БД
-│   └── index.ts              # Подключение к БД
-└── lib/
-    ├── constants.ts          # Константы и тарифы
-    ├── db-operations.ts      # Операции с БД
-    └── validate-bot.ts       # Валидация Python-кода
+
+## 🖥️ Деплой на VPS (Hetzner/DigitalOcean)
+
+### Шаг 1: Аренда VPS
+
+Рекомендую:
+- **Hetzner** CX22: €4.35/мес (2 vCPU, 4 GB RAM)
+- **DigitalOcean** Basic: $6/мес (1 vCPU, 1 GB RAM)
+- **Contabo** Cloud VPS S: €4.99/мес (4 vCPU, 8 GB RAM)
+
+### Шаг 2: Настройка сервера
+
+```bash
+# SSH подключение
+ssh root@your-server-ip
+
+# Обновление системы
+apt update && apt upgrade -y
+
+# Установка Docker
+curl -fsSL https://get.docker.com | sh
+
+# Установка Python 3.11
+apt install -y python3.11 python3.11-venv python3-pip git
+
+# Клонирование проекта
+git clone https://github.com/your-username/bothost.git
+cd bothost/runner
+
+# Создание venv
+python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-## 🔐 Безопасность
+### Шаг 3: Конфигурация
 
-### Валидация кода ботов
+```bash
+nano .env
+```
 
-Система проверяет загруженный Python-код:
+Вставьте:
+```env
+BOT_TOKEN=1234567890:ABCdef...
+OWNER_TELEGRAM_ID=123456789
+OWNER_PHONE=+79991234567
+OWNER_API_ID=12345678
+OWNER_API_HASH=abcdef1234567890...
+WEBSITE_URL=https://bothost.vercel.app
+RUNNER_SECRET=very_secret_string
+PORT=8000
+BOTS_DIR=/opt/bothost/bots
+```
 
-1. **Наличие Telegram-библиотек** (aiogram, telebot, pyrogram и др.)
-2. **Отсутствие хардкоднутых токенов** (regex-проверка)
-3. **Использование переменных окружения** для токенов
-4. **Отсутствие опасных операций** (rm, subprocess и т.д.)
-5. **Базовая проверка синтаксиса**
+### Шаг 4: Запуск через systemd
 
-### Пример правильного кода:
+Создайте `/etc/systemd/system/bothost-runner.service`:
 
+```ini
+[Unit]
+Description=BotHost Runner
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/bothost/runner
+Environment="PATH=/opt/bothost/runner/venv/bin"
+ExecStart=/opt/bothost/runner/venv/bin/python runner.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Создайте `/etc/systemd/system/bothost-bot.service`:
+
+```ini
+[Unit]
+Description=BotHost Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/bothost/runner
+Environment="PATH=/opt/bothost/runner/venv/bin"
+ExecStart=/opt/bothost/runner/venv/bin/python bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Запустите:
+```bash
+systemctl daemon-reload
+systemctl enable bothost-runner bothost-bot
+systemctl start bothost-runner bothost-bot
+```
+
+### Шаг 5: Nginx + SSL
+
+```bash
+apt install -y nginx certbot python3-certbot-nginx
+```
+
+Создайте `/etc/nginx/sites-available/runner`:
+
+```nginx
+server {
+    server_name runner.yourdomain.com;
+    
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+```bash
+ln -s /etc/nginx/sites-available/runner /etc/nginx/sites-enabled/
+nginx -t
+systemctl reload nginx
+certbot --nginx -d runner.yourdomain.com
+```
+
+## 🔒 Безопасность
+
+### Изоляция ботов
+
+Каждый бот пользователя запускается в отдельном Docker-контейнере с ограничениями:
+
+- **RAM**: 256 MB (настраивается через `MAX_MEMORY_MB`)
+- **CPU**: 0.5 cores (настраивается через `MAX_CPU`)
+- **Network**: bridge (можно отключить)
+- **Restart**: on-failure:3
+
+### Секреты
+
+- `RUNNER_SECRET` — для аутентификации запросов от сайта
+- Токены ботов пользователей передаются только через env-переменные контейнера
+- Токены НЕ сохраняются в БД сайта (только в runner)
+
+### Файрвол
+
+На VPS настройте UFW:
+```bash
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow from YOUR_VERCEL_IP to any port 8000
+ufw enable
+```
+
+## 📊 Мониторинг
+
+### Логи
+
+```bash
+# Runner
+journalctl -u bothost-runner -f
+
+# Telegram Bot
+journalctl -u bothost-bot -f
+
+# Контейнеры пользователей
+docker logs bothost_bot_123
+```
+
+### Метрики
+
+Используйте `docker stats` для мониторинга:
+```bash
+docker stats --no-stream
+```
+
+### Алерты
+
+Добавьте в `bot.py` уведомления владельцу:
 ```python
-import os
-from aiogram import Bot, Dispatcher
-
-# ✅ ПРАВИЛЬНО — токен из окружения
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+if container.status == "error":
+    await bot.send_message(OWNER_TELEGRAM_ID, f"⚠️ Бот {bot_id} упал!")
 ```
 
-### Пример неправильного кода:
+## 🔄 Обновления
 
-```python
-# ❌ НЕПРАВИЛЬНО — хардкоднутый токен
-BOT_TOKEN = "1234567890:ABCdefGhI..."
-bot = Bot(token=BOT_TOKEN)
+```bash
+cd /opt/bothost/runner
+git pull
+systemctl restart bothost-runner bothost-bot
 ```
 
-## 💳 Telegram Stars
+## 💾 Бэкапы
 
-Оплата проходит через **Telegram Stars** (валюта XTR):
+### Бэкап PostgreSQL (сайт)
 
-- Звёзды поступают **напрямую владельцу бота**
-- Комиссия Telegram: 0% (на момент 2026)
-- Вывод через BotFather → Bot Settings → Payments → Telegram Stars Balance
+```bash
+# На Vercel/Neon: автоматические бэкапы
+# Локально:
+pg_dump $DATABASE_URL > backup_$(date +%Y%m%d).sql
+```
 
-## 🎁 Промокоды
+### Бэкап кода ботов
 
-Администраторы могут создавать промокоды через:
+```bash
+tar -czf bots_backup_$(date +%Y%m%d).tar.gz /opt/bothost/bots
+# Загрузить в S3/R2:
+aws s3 cp bots_backup_*.tar.gz s3://your-bucket/
+```
 
-- Веб-админку: `/admin`
-- Telegram-бота: команда `/admin`
+## 🆘 Troubleshooting
 
-Промокоды дают **бесплатный слот** на выбранный период.
+### Docker permission denied
 
-## 🛠️ Технологии
+```bash
+usermod -aG docker $USER
+newgrp docker
+```
 
-- **Frontend**: Next.js 16, React 19, Tailwind CSS 4
-- **Backend**: Next.js API Routes, Drizzle ORM
-- **Database**: PostgreSQL
-- **Telegram**: aiogram 3.x (Python)
-- **Deploy**: Vercel (сайт), Railway/Render (бот)
+### Порт 8000 занят
 
-## 📝 Лицензия
+```bash
+lsof -i :8000
+kill -9 <PID>
+```
 
-MIT
+### Контейнер не запускается
 
-## 🤝 Поддержка
+```bash
+docker logs bothost_bot_123
+docker inspect bothost_bot_123
+```
 
-По всем вопросам обращайтесь к администратору или создайте Issue в репозитории.
+### Подарки не отслеживаются
+
+- Проверьте `OWNER_API_ID`, `OWNER_API_HASH`, `OWNER_PHONE`
+- Убедитесь, что номер владельца совпадает
+- Проверьте, что 2FA отключена (или передайте пароль)
+
+## 📈 Масштабирование
+
+### Вертикальное
+
+Увеличьте CPU/RAM на VPS:
+- Hetzner: CX32 (4 vCPU, 8 GB) за €8.35/мес
+- DigitalOcean: s-4vcpu-8gb за $48/мес
+
+### Горизонтальное
+
+Запустите несколько runner'ов, сайт будет балансировать:
+```
+runner-1.example.com
+runner-2.example.com
+runner-3.example.com
+```
+
+Добавьте в сайт логику выбора runner'а по `bot_id % runners_count`.
+
+## 🎯 Итоговая стоимость
+
+| Компонент | План | Цена/мес |
+|-----------|------|----------|
+| Vercel (сайт) | Hobby | $0 |
+| Neon (БД) | Free | $0 |
+| Railway (runner) | Starter | $5 |
+| **Итого** | | **$5** |
+
+Или на VPS:
+| Компонент | План | Цена/мес |
+|-----------|------|----------|
+| Vercel (сайт) | Hobby | $0 |
+| Neon (БД) | Free | $0 |
+| Hetzner VPS | CX22 | €4.35 |
+| **Итого** | | **~$5** |
 
 ---
 
-**BotHost** — хостинг Telegram-ботов нового поколения ⭐
+**Готово!** Ваш BotHost работает и принимает подарки 🎁

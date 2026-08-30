@@ -1,10 +1,10 @@
 """
-🤖 BotHost — хостинг Telegram-ботов (Универсальная версия v4.1)
+🤖 BotHost — хостинг Telegram-ботов (Версия 4.2 — Cloud Backup)
+✅ Сохранение и восстановление базы через Telegram!
 ✅ Система ПРОМОКОДОВ
-✅ Поддержка .zip архивов (мультифайловые проекты)
-✅ Увеличен лимит до 20 МБ
-✅ Автопоиск main.py в архиве + requirements.txt
-✅ Ручное подтверждение оплат (заявки в админке)
+✅ Поддержка .zip архивов
+✅ Лимит 20 МБ
+✅ Ручное подтверждение оплат
 """
 
 import os
@@ -33,7 +33,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 # ═══════════════════════════════════════════════════════════════
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8711311188:AAHnhjvLhyYASMxUI-1hLyktHXhSsmYXnww")
-OWNER_ID = 8269807543  # Вшит навсегда
+OWNER_ID = 8269807543  # Твой ID
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "ivan_unreal")
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/app/data"))
@@ -68,11 +68,8 @@ def init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS slots (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, plan TEXT, expires_at TEXT, created_at TEXT, gift_id TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS bots (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, filename TEXT, bot_token TEXT, status TEXT DEFAULT 'stopped', created_at TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS payment_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, full_name TEXT, plan TEXT, status TEXT DEFAULT 'pending', created_at TEXT, processed_at TEXT)""")
-    
-    # Таблицы для промокодов
     c.execute("""CREATE TABLE IF NOT EXISTS promocodes (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE, plan TEXT, uses_left INTEGER, created_at TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS used_promos (user_id INTEGER, promo_id INTEGER, UNIQUE(user_id, promo_id))""")
-    
     conn.commit()
     conn.close()
 
@@ -217,7 +214,6 @@ def user_has_pending_request(user_id: int) -> bool:
     count = c.fetchone()[0]; conn.close()
     return count > 0
 
-# --- ПРОМОКОДЫ ---
 def create_promo(code: str, plan: str, uses: int):
     conn = get_db(); c = conn.cursor()
     try:
@@ -261,7 +257,6 @@ def use_promo(user_id: int, code: str):
     create_slot(user_id, promo[1])
     return True, promo[1]
 
-# --- СТАТИСТИКА ---
 def get_stats():
     conn = get_db(); c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM users"); total_users = c.fetchone()[0]
@@ -285,47 +280,24 @@ def get_stats():
 # ═══════════════════════════════════════════════════════════════
 
 WRAPPER_CODE = '''#!/usr/bin/env python3
-import os
-import sys
-import re
-import signal
-import subprocess
-import time
-import traceback
+import os, sys, re, signal, subprocess, time, traceback
 
 ENTRY_POINT = "{{ENTRY_POINT}}"
 
-def log(msg):
-    print(f"[BotHost] {msg}", flush=True)
-
+def log(msg): print(f"[BotHost] {msg}", flush=True)
 log(f"Запуск проекта. Исполняемый файл: {ENTRY_POINT}")
 
-STDLIB_MODULES = {
-    "os", "sys", "re", "json", "time", "datetime", "asyncio", "logging", "pathlib", "typing", "subprocess", "signal", 
-    "html", "math", "random", "collections", "itertools", "functools", "traceback", "threading", "queue", "socket", 
-    "urllib", "http", "email", "base64", "hashlib", "hmac", "uuid", "sqlite3", "csv", "io", "tempfile", "shutil", 
-    "copy", "argparse", "warnings", "contextlib", "dataclasses", "enum", "abc", "inspect", "operator", "string", 
-    "textwrap", "unicodedata", "struct", "codecs", "pickle", "gzip", "zipfile", "tarfile", "glob", "fnmatch", 
-    "builtins", "statistics", "secrets", "ssl", "calendar"
-}
+STDLIB_MODULES = {"os", "sys", "re", "json", "time", "datetime", "asyncio", "logging", "pathlib", "typing", "subprocess", "signal", "html", "math", "random", "collections", "itertools", "functools", "traceback", "threading", "queue", "socket", "urllib", "http", "email", "base64", "hashlib", "hmac", "uuid", "sqlite3", "csv", "io", "tempfile", "shutil", "copy", "argparse", "warnings", "contextlib", "dataclasses", "enum", "abc", "inspect", "operator", "string", "textwrap", "unicodedata", "struct", "codecs", "pickle", "gzip", "zipfile", "tarfile", "glob", "fnmatch", "builtins", "statistics", "secrets", "ssl", "calendar"}
+PIP_MAPPING = {"telebot": "pyTelegramBotAPI", "cv2": "opencv-python", "PIL": "Pillow", "yaml": "PyYAML", "bs4": "beautifulsoup4", "dotenv": "python-dotenv", "telegram": "python-telegram-bot", "discord": "discord.py"}
 
-PIP_MAPPING = {
-    "telebot": "pyTelegramBotAPI", "cv2": "opencv-python", "PIL": "Pillow", "yaml": "PyYAML", 
-    "bs4": "beautifulsoup4", "dotenv": "python-dotenv", "telegram": "python-telegram-bot", "discord": "discord.py"
-}
-
-def is_installed(module_name):
-    try:
-        __import__(module_name)
-        return True
-    except:
-        return False
+def is_installed(m):
+    try: __import__(m); return True
+    except: return False
 
 if os.path.exists("requirements.txt"):
-    log("Нашли requirements.txt, устанавливаем пакеты...")
+    log("Устанавливаем пакеты из requirements.txt...")
     subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet", "--no-cache-dir"])
 else:
-    log("Сканируем .py файлы на наличие зависимостей...")
     imports = set()
     for root, dirs, files in os.walk("."):
         for file in files:
@@ -339,45 +311,33 @@ else:
                             m = re.match(r"^from\\s+([a-zA-Z_][a-zA-Z0-9_]*)", line)
                             if m: imports.add(m.group(1))
                 except: pass
-    
     missing = [imp for imp in imports if imp not in STDLIB_MODULES and not is_installed(imp)]
     if missing:
-        log(f"Нужно установить: {missing}")
+        log(f"Устанавливаем: {missing}")
         for mod in missing:
-            pkg = PIP_MAPPING.get(mod, mod)
-            subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "--no-cache-dir", pkg])
-    else:
-        log("Дополнительные зависимости не требуются.")
+            subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "--no-cache-dir", PIP_MAPPING.get(mod, mod)])
 
 process = None
-
 def handle_signal(signum, frame):
-    log("Получен сигнал остановки, выключаем бота...")
+    log("Выключаем бота...")
     if process:
         process.terminate()
-        try:
-            process.wait(timeout=5)
-        except:
-            process.kill()
+        try: process.wait(timeout=5)
+        except: process.kill()
     sys.exit(0)
 
 signal.signal(signal.SIGTERM, handle_signal)
 signal.signal(signal.SIGINT, handle_signal)
 
 if not os.path.exists(ENTRY_POINT):
-    log(f"ОШИБКА: Файл {ENTRY_POINT} не найден!")
-    sys.exit(1)
+    log(f"ОШИБКА: Файл {ENTRY_POINT} не найден!"); sys.exit(1)
 
 log("🚀 Запускаем главный процесс!")
 sys.stdout.flush()
-
 process = subprocess.Popen([sys.executable, "-u", ENTRY_POINT], env=os.environ.copy())
-
 while True:
     ret = process.poll()
-    if ret is not None:
-        log(f"Бот завершил работу (код {ret})")
-        sys.exit(ret)
+    if ret is not None: sys.exit(ret)
     time.sleep(1)
 '''
 
@@ -394,19 +354,13 @@ async def start_user_bot(bot_id: int) -> bool:
         env["PYTHONUNBUFFERED"] = "1"
 
         with open(log_file, "w", encoding="utf-8") as lf:
-            process = subprocess.Popen(
-                [sys.executable, "-u", "wrapper.py"],
-                cwd=str(bot_dir), env=env, stdout=lf, stderr=subprocess.STDOUT, start_new_session=True
-            )
+            process = subprocess.Popen([sys.executable, "-u", "wrapper.py"], cwd=str(bot_dir), env=env, stdout=lf, stderr=subprocess.STDOUT, start_new_session=True)
 
         running_bots[bot_id] = process
         await asyncio.sleep(8)
-
         if process.poll() is not None:
             await asyncio.sleep(4)
             if process.poll() is not None:
-                logs = log_file.read_text(encoding="utf-8", errors="ignore")
-                logger.error(f"❌ Бот #{bot_id} упал:\n{logs[-1000:]}")
                 conn = get_db(); c = conn.cursor()
                 c.execute("UPDATE bots SET status = 'error' WHERE id = ?", (bot_id,))
                 conn.commit(); conn.close()
@@ -416,12 +370,8 @@ async def start_user_bot(bot_id: int) -> bool:
         conn = get_db(); c = conn.cursor()
         c.execute("UPDATE bots SET status = 'running' WHERE id = ?", (bot_id,))
         conn.commit(); conn.close()
-        logger.info(f"✅ Бот #{bot_id} запущен (PID {process.pid})")
         return True
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка запуска #{bot_id}: {e}")
-        return False
+    except: return False
 
 async def stop_user_bot(bot_id: int):
     if bot_id in running_bots:
@@ -434,11 +384,9 @@ async def stop_user_bot(bot_id: int):
         except: pass
         finally:
             if bot_id in running_bots: del running_bots[bot_id]
-
     conn = get_db(); c = conn.cursor()
     c.execute("UPDATE bots SET status = 'stopped' WHERE id = ?", (bot_id,))
     conn.commit(); conn.close()
-    logger.info(f"⏹ Бот #{bot_id} остановлен")
 
 def get_bot_logs(bot_id: int, lines: int = 50) -> str:
     log_file = BOTS_DIR / f"bot_{bot_id}" / "bot.log"
@@ -449,7 +397,6 @@ def get_bot_logs(bot_id: int, lines: int = 50) -> str:
     except: return "❌ Ошибка чтения логов"
 
 async def monitor_bots():
-    logger.info("🔄 Мониторинг запущен")
     while True:
         try:
             for bot_id, proc in list(running_bots.items()):
@@ -463,9 +410,7 @@ async def monitor_bots():
 
                     if row and row[0] != OWNER_ID:
                         logs = get_bot_logs(bot_id, 10)
-                        logs_safe = html.escape(logs[-500:])
-                        try:
-                            await bot.send_message(row[0], f"⚠️ <b>Бот #{bot_id} упал</b>\nКод: {code}\n<pre>{logs_safe}</pre>", parse_mode="HTML")
+                        try: await bot.send_message(row[0], f"⚠️ <b>Бот #{bot_id} упал</b>\nКод: {code}\n<pre>{html.escape(logs[-500:])}</pre>", parse_mode="HTML")
                         except: pass
                 else:
                     conn = get_db(); c = conn.cursor()
@@ -480,16 +425,22 @@ async def monitor_bots():
         await asyncio.sleep(30)
 
 async def restore_running_bots():
-    logger.info("🔄 Восстановление ботов...")
     conn = get_db(); c = conn.cursor()
     c.execute("SELECT id, user_id FROM bots WHERE status = 'running'")
     bots_to_restore = c.fetchall(); conn.close()
-    restored = 0
     for bot_id, user_id in bots_to_restore:
         if is_user_banned(user_id): continue
         if user_id != OWNER_ID and not is_admin(user_id) and not has_active_slot(user_id): continue
-        if await start_user_bot(bot_id): restored += 1
-    logger.info(f"✅ Восстановлено: {restored}")
+        await start_user_bot(bot_id)
+
+async def auto_backup():
+    """Отправляет базу данных владельцу каждые 24 часа"""
+    while True:
+        await asyncio.sleep(24 * 3600)
+        try:
+            if os.path.exists(DB_PATH):
+                await bot.send_document(OWNER_ID, FSInputFile(DB_PATH, filename=f"bothost_backup_{datetime.now().strftime('%Y%m%d')}.db"), caption="🔄 Ежедневный авто-бэкап базы данных")
+        except: pass
 
 # ═══════════════════════════════════════════════════════════════
 # 💬 ИНТЕРФЕЙС
@@ -517,11 +468,9 @@ WELCOME_TEXT = """👋 <b>Привет, {name}!</b>
 
 def main_menu_kb(user_id):
     buttons = [
-        [InlineKeyboardButton(text="💎 Купить слот", callback_data="buy"),
-         InlineKeyboardButton(text="🎟 Промокод", callback_data="promo_enter")],
+        [InlineKeyboardButton(text="💎 Купить слот", callback_data="buy"), InlineKeyboardButton(text="🎟 Промокод", callback_data="promo_enter")],
         [InlineKeyboardButton(text="📤 Загрузить бота", callback_data="upload")],
-        [InlineKeyboardButton(text="🤖 Мои боты", callback_data="mybots"),
-         InlineKeyboardButton(text="📊 Мои слоты", callback_data="myslots")],
+        [InlineKeyboardButton(text="🤖 Мои боты", callback_data="mybots"), InlineKeyboardButton(text="📊 Мои слоты", callback_data="myslots")],
         [InlineKeyboardButton(text="❓ Помощь", callback_data="help")],
     ]
     if is_admin(user_id): buttons.append([InlineKeyboardButton(text="🔐 Админ-панель", callback_data="admin")])
@@ -533,15 +482,6 @@ async def send_welcome(target, edit=False):
     text = WELCOME_TEXT.format(name=name)
     kb = main_menu_kb(user_id)
     chat_id = target.chat.id if hasattr(target, 'chat') else user_id
-
-    if WELCOME_IMAGE.exists() and user_id != OWNER_ID:
-        try:
-            if edit:
-                try: await target.delete()
-                except: pass
-            await bot.send_photo(chat_id=chat_id, photo=FSInputFile(WELCOME_IMAGE), caption=text, reply_markup=kb, parse_mode="HTML")
-            return
-        except: pass
 
     if edit:
         try: return await target.edit_text(text, reply_markup=kb, parse_mode="HTML")
@@ -565,7 +505,6 @@ class AdminStates(StatesGroup):
     ban = State()
     unban = State()
     addadmin = State()
-    welcome_photo = State()
     promo_code = State()
     promo_uses = State()
 
@@ -584,6 +523,19 @@ async def cmd_start(message: types.Message, state: FSMContext):
 async def cmd_cancel(message: types.Message, state: FSMContext):
     await state.clear(); await message.answer("❌ Действие отменено.")
 
+# --- ВОССТАНОВЛЕНИЕ БАЗЫ ДАННЫХ ИЗ ФАЙЛА (.DB) ---
+@dp.message(F.document, F.from_user.id == OWNER_ID)
+async def admin_db_restore(message: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    # Если мы не в состоянии загрузки бота, а админ кидает файл базы данных
+    if current_state is None and message.document.file_name.endswith(".db"):
+        await message.answer("⏳ Скачиваю новую базу данных...")
+        file_id = message.document.file_id
+        file = await bot.get_file(file_id)
+        await bot.download_file(file.file_path, destination=DB_PATH)
+        await message.answer("✅ <b>База данных успешно восстановлена!</b>\n\nСделайте рестарт ботов в админ-панели.", parse_mode="HTML")
+        return
+
 # ─── FSM: ПРОМОКОДЫ ДЛЯ ЮЗЕРА ─────────────
 
 @dp.callback_query(F.data == "promo_enter")
@@ -594,7 +546,7 @@ async def cb_promo_enter(call: types.CallbackQuery, state: FSMContext):
 
 @dp.message(UserStates.enter_promo)
 async def process_promo(message: types.Message, state: FSMContext):
-    code = message.text.strip()
+    code = message.text.strip().upper()
     success, result = use_promo(message.from_user.id, code)
     
     if success:
@@ -619,7 +571,7 @@ async def handle_file(message: types.Message, state: FSMContext):
         return await message.answer("❌ Файл слишком большой. Максимальный размер 20 МБ.")
 
     await state.update_data(file_id=doc.file_id, filename=filename, ext=ext)
-    await message.answer(f"✅ <b>Файл {filename} принят!</b>\n\nТеперь отправь <b>токен бота</b> от @BotFather.\nЕсли токен не нужен — напиши: <code>none</code>\n\n🔒 <i>Сообщение с токеном будет сразу удалено.</i>", parse_mode="HTML")
+    await message.answer(f"✅ <b>Файл {filename} принят!</b>\n\nТеперь отправь <b>токен бота</b> от @BotFather.\nЕсли токен не нужен — напиши: <code>none</code>", parse_mode="HTML")
     await state.set_state(UploadStates.waiting_token)
 
 @dp.message(UploadStates.waiting_token)
@@ -691,13 +643,11 @@ async def handle_token(message: types.Message, state: FSMContext):
         await message.answer(f"❌ Произошла ошибка при сохранении/распаковке: {e}")
         await state.clear()
 
-
 # ─── Callback ─────────────────────────────────────────────
 
 @dp.callback_query(F.data == "back_main")
 async def cb_back_main(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    if is_user_banned(call.from_user.id): return await call.answer("🚫 Заблокированы", show_alert=True)
     try: await call.message.delete()
     except: pass
     await send_welcome(call.message)
@@ -705,10 +655,7 @@ async def cb_back_main(call: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "buy")
 async def cb_buy(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    if is_user_banned(call.from_user.id): return await call.answer("🚫 Заблокированы", show_alert=True)
-
-    if call.from_user.id == OWNER_ID or is_admin(call.from_user.id):
-        return await call.message.edit_text("👑 <b>Ты — админ!</b>\n\n<b>Безлимит</b> бесплатно.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📤 Загрузить бота", callback_data="upload")], [InlineKeyboardButton(text="« Меню", callback_data="back_main")]]), parse_mode="HTML")
+    if call.from_user.id == OWNER_ID or is_admin(call.from_user.id): return await call.message.edit_text("👑 <b>Ты — админ!</b>\n\n<b>Безлимит</b> бесплатно.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📤 Загрузить бота", callback_data="upload")], [InlineKeyboardButton(text="« Меню", callback_data="back_main")]]), parse_mode="HTML")
 
     text = ("💎 <b>Выбери тариф</b>\n\n━━━━━━━━━━━━━━━\n\nОплата <b>подарком</b> владельцу.\n\n━━━━━━━━━━━━━━━")
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -742,25 +689,20 @@ async def cb_pay_done(call: types.CallbackQuery, state: FSMContext):
     plan = PLANS[plan_id]
     user = call.from_user
 
-    if user_has_pending_request(user.id):
-        return await call.answer("⏳ У тебя уже есть заявка на проверке!", show_alert=True)
-
+    if user_has_pending_request(user.id): return await call.answer("⏳ У тебя уже есть заявка на проверке!", show_alert=True)
     req_id = create_payment_request(user.id, user.username or "", user.full_name or "", plan_id)
 
     await call.message.edit_text(f"✅ <b>Заявка #{req_id} отправлена!</b>\n\n{plan['emoji']} <b>{plan['name']}</b> ({plan['stars']}⭐)\n\n⏳ Админ проверит оплату и активирует слот.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Меню", callback_data="back_main")]]), parse_mode="HTML")
 
-    uname = f"@{user.username}" if user.username else "—"
     kb_admin = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve:{req_id}"), InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{req_id}")]])
-    try: await bot.send_message(OWNER_ID, f"💰 <b>Новая заявка #{req_id}</b>\n\n👤 {uname} (<code>{user.id}</code>)\n{plan['emoji']} <b>{plan['name']}</b> ({plan['stars']}⭐)", reply_markup=kb_admin, parse_mode="HTML")
+    try: await bot.send_message(OWNER_ID, f"💰 <b>Новая заявка #{req_id}</b>\n\n👤 @{user.username or '—'} (<code>{user.id}</code>)\n{plan['emoji']} <b>{plan['name']}</b> ({plan['stars']}⭐)", reply_markup=kb_admin, parse_mode="HTML")
     except: pass
     await call.answer("✅ Заявка отправлена")
 
 @dp.callback_query(F.data == "upload")
 async def cb_upload(call: types.CallbackQuery, state: FSMContext):
-    if is_user_banned(call.from_user.id):
-        await state.clear(); return await call.answer("🚫 Заблокированы", show_alert=True)
-    if not has_active_slot(call.from_user.id):
-        await state.clear(); return await call.answer("❌ Нет слота!", show_alert=True)
+    if is_user_banned(call.from_user.id): return await call.answer("🚫 Заблокированы", show_alert=True)
+    if not has_active_slot(call.from_user.id): return await call.answer("❌ Нет слота!", show_alert=True)
 
     await call.message.edit_text("📤 <b>Загрузка проекта</b>\n\nОтправь <b>.py</b> файл или <b>.zip</b> архив.\n\n━━━━━━━━━━━━━━━\n\n📦 <b>Для архивов (.zip)</b>\nБот сам распакует файлы, найдёт <code>main.py</code> и установит библиотеки из <code>requirements.txt</code>!\n\n💡 Токен можно не указывать: <code>none</code>\n📏 Лимит: 20 МБ", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Отмена", callback_data="back_main")]]), parse_mode="HTML")
     await state.set_state(UploadStates.waiting_file)
@@ -777,7 +719,6 @@ async def cb_mybots(call: types.CallbackQuery, state: FSMContext):
         fname = b[2] if not str(b[2]).endswith(".zip") else "[ZIP Архив]"
         buttons.append([InlineKeyboardButton(text=f"{status} #{b[0]} • {fname}", callback_data=f"bot:{b[0]}")])
     buttons.append([InlineKeyboardButton(text="« Меню", callback_data="back_main")])
-
     await call.message.edit_text(f"🤖 <b>Твои боты ({len(bots)})</b>\n\n🟢 работает • 🔴 остановлен", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("bot:"))
@@ -790,8 +731,7 @@ async def cb_bot_detail(call: types.CallbackQuery):
     await call.message.edit_text(f"🤖 <b>Бот #{bot_id}</b>\n\n📁 Исходник: <code>{b[2]}</code>\n📊 Статус: {status}\n📅 {b[5][:10]}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="▶️ Запуск", callback_data=f"start:{bot_id}"), InlineKeyboardButton(text="⏹ Стоп", callback_data=f"stop:{bot_id}")],
-            [InlineKeyboardButton(text="📄 Логи", callback_data=f"logs:{bot_id}")],
-            [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"del:{bot_id}")],
+            [InlineKeyboardButton(text="📄 Логи", callback_data=f"logs:{bot_id}"), InlineKeyboardButton(text="🗑 Удалить", callback_data=f"del:{bot_id}")],
             [InlineKeyboardButton(text="« Список", callback_data="mybots")]]), parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("start:"))
@@ -804,9 +744,7 @@ async def cb_start_bot(call: types.CallbackQuery, state: FSMContext):
     if bot_id in running_bots: return await call.answer("⚠️ Уже запущен", show_alert=True)
 
     await call.answer("⏳ Запускаю проект (устанавливаю зависимости)...")
-    success = await start_user_bot(bot_id)
-    
-    if success: await call.message.answer(f"✅ <b>Бот #{bot_id} запущен!</b>", parse_mode="HTML")
+    if await start_user_bot(bot_id): await call.message.answer(f"✅ <b>Бот #{bot_id} запущен!</b>", parse_mode="HTML")
     else:
         logs_text = html.escape(get_bot_logs(bot_id, 40)[-2000:]) if get_bot_logs(bot_id, 40).strip() else "📭 Пусто"
         await call.message.answer(f"❌ <b>Бот #{bot_id} упал</b>\n\n<pre>{logs_text}</pre>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔄 Снова", callback_data=f"start:{bot_id}")], [InlineKeyboardButton(text="📄 Логи", callback_data=f"logs:{bot_id}")], [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"del:{bot_id}")], [InlineKeyboardButton(text="« Список", callback_data="mybots")]]))
@@ -839,7 +777,6 @@ async def cb_delete_bot(call: types.CallbackQuery):
     import shutil
     bot_dir = BOTS_DIR / f"bot_{bot_id}"
     if bot_dir.exists(): shutil.rmtree(bot_dir, ignore_errors=True)
-        
     delete_bot_record(bot_id)
     await call.answer("🗑 Удалён")
     await cb_mybots(call, None)
@@ -847,8 +784,7 @@ async def cb_delete_bot(call: types.CallbackQuery):
 @dp.callback_query(F.data == "myslots")
 async def cb_myslots(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    if call.from_user.id == OWNER_ID or is_admin(call.from_user.id):
-        return await call.message.edit_text("👑 <b>Безлимит</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Меню", callback_data="back_main")]]), parse_mode="HTML")
+    if call.from_user.id == OWNER_ID or is_admin(call.from_user.id): return await call.message.edit_text("👑 <b>Безлимит</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Меню", callback_data="back_main")]]), parse_mode="HTML")
 
     slots = get_active_slots(call.from_user.id)
     if not slots: return await call.message.edit_text("💳 <b>Нет активных слотов</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💎 Купить", callback_data="buy")], [InlineKeyboardButton(text="« Меню", callback_data="back_main")]]), parse_mode="HTML")
@@ -883,11 +819,11 @@ async def show_admin_panel(message, edit=False):
     pay_text = "💰 Заявки 🔴" if s['pending_reqs'] > 0 else "💰 Заявки"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=pay_text, callback_data="adm:payments"), InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm:promos")],
+        [InlineKeyboardButton(text="💾 Резервная копия БД", callback_data="adm:backup")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="adm:stats"), InlineKeyboardButton(text="📢 Рассылка", callback_data="adm:broadcast")],
         [InlineKeyboardButton(text="👥 Users", callback_data="adm:users")],
         [InlineKeyboardButton(text="🚫 Бан", callback_data="adm:ban"), InlineKeyboardButton(text="✅ Разбан", callback_data="adm:unban")],
         [InlineKeyboardButton(text="🛡 +Админ", callback_data="adm:addadmin"), InlineKeyboardButton(text="❌ -Админ", callback_data="adm:remadmin")],
-        [InlineKeyboardButton(text="🖼 Приветствие", callback_data="adm:welcome")],
         [InlineKeyboardButton(text="🔄 Рестарт всех", callback_data="adm:restart")],
         [InlineKeyboardButton(text="« Меню", callback_data="back_main")]])
     if edit: await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
@@ -899,13 +835,21 @@ async def cb_admin(call: types.CallbackQuery, state: FSMContext):
     if not is_admin(call.from_user.id): return await call.answer("🔐 Нет прав", show_alert=True)
     await show_admin_panel(call.message, edit=True)
 
+@dp.callback_query(F.data == "adm:backup")
+async def cb_adm_backup(call: types.CallbackQuery):
+    if call.from_user.id != OWNER_ID: return await call.answer("Только владелец", show_alert=True)
+    if os.path.exists(DB_PATH):
+        await call.message.answer_document(FSInputFile(DB_PATH, filename=f"bothost_backup_{datetime.now().strftime('%Y%m%d')}.db"), caption="💾 Ваша база данных.\n\nЕсли сервер очистится, просто отправьте этот файл мне обратно, и я всё восстановлю!")
+        await call.answer("✅ Бэкап отправлен!")
+    else:
+        await call.answer("❌ Файл базы не найден!", show_alert=True)
+
 # --- АДМИНКА ПРОМОКОДОВ ---
 
 @dp.callback_query(F.data == "adm:promos")
 async def cb_adm_promos(call: types.CallbackQuery):
     if not is_admin(call.from_user.id): return
     promos = get_all_promos()
-    
     text = "🎟 <b>Активные промокоды:</b>\n\n"
     buttons = [[InlineKeyboardButton(text="➕ Создать промокод", callback_data="adm:promo_add")]]
     
@@ -928,12 +872,10 @@ async def cb_adm_promo_add(call: types.CallbackQuery, state: FSMContext):
 async def adm_promo_code_step(message: types.Message, state: FSMContext):
     code = message.text.strip().upper()
     await state.update_data(code=code)
-    
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📅 Неделя", callback_data="adm:promo_plan:week")],
         [InlineKeyboardButton(text="📅 2 недели", callback_data="adm:promo_plan:2weeks")],
-        [InlineKeyboardButton(text="🗓 Месяц", callback_data="adm:promo_plan:month")]
-    ])
+        [InlineKeyboardButton(text="🗓 Месяц", callback_data="adm:promo_plan:month")]])
     await message.answer(f"Промокод: <code>{code}</code>\n\nВыберите тариф, который он будет выдавать:", reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("adm:promo_plan:"))
@@ -945,8 +887,7 @@ async def adm_promo_plan_step(call: types.CallbackQuery, state: FSMContext):
 
 @dp.message(AdminStates.promo_uses)
 async def adm_promo_uses_step(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        return await message.answer("❌ Отправьте число!")
+    if not message.text.isdigit(): return await message.answer("❌ Отправьте число!")
     uses = int(message.text)
     data = await state.get_data()
     
@@ -959,8 +900,7 @@ async def adm_promo_uses_step(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("adm:promo_del:"))
 async def cb_adm_promo_del(call: types.CallbackQuery):
     if not is_admin(call.from_user.id): return
-    promo_id = int(call.data.split(":")[2])
-    delete_promo(promo_id)
+    delete_promo(int(call.data.split(":")[2]))
     await call.answer("🗑 Удалено!")
     await cb_adm_promos(call)
 
@@ -1003,7 +943,7 @@ async def cb_reject(call: types.CallbackQuery):
     if not is_admin(call.from_user.id): return await call.answer("🔐 Нет прав", show_alert=True)
     req_id = int(call.data.split(":")[1])
     req = get_payment_request(req_id)
-    if not req or req[5] != "pending": return await call.answer("❌ Заявка не найдена или обработана", show_alert=True)
+    if not req or req[5] != "pending": return await call.answer("❌ Заявка не найдена", show_alert=True)
 
     user_id = req[1]
     reject_payment(req_id)
@@ -1067,13 +1007,6 @@ async def cb_remadm_confirm(call: types.CallbackQuery):
     await call.answer("✅ Удалён")
     await show_admin_panel(call.message, edit=True)
 
-@dp.callback_query(F.data == "adm:welcome")
-async def cb_welcome(call: types.CallbackQuery, state: FSMContext):
-    if call.from_user.id != OWNER_ID: return await call.answer("⚠️ Только владелец", show_alert=True)
-    status = "✅" if WELCOME_IMAGE.exists() else "📭"
-    await call.message.edit_text(f"🖼 <b>Приветствие</b>\n\n{status}\n\nОтправь фото или <code>delete</code>\nОтмена: /cancel", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Админка", callback_data="admin")]]), parse_mode="HTML")
-    await state.set_state(AdminStates.welcome_photo)
-
 @dp.callback_query(F.data == "adm:restart")
 async def cb_restart_all(call: types.CallbackQuery):
     if not is_admin(call.from_user.id): return
@@ -1098,12 +1031,13 @@ async def cb_restart_all(call: types.CallbackQuery):
 async def main():
     init_db()
     logger.info("=" * 50)
-    logger.info("🤖 BotHost v4.1 (С промокодами) запущен")
+    logger.info("🤖 BotHost v4.2 (Cloud Backup & Promos) запущен")
     logger.info(f"👤 Владелец: {OWNER_ID}")
     logger.info("=" * 50)
 
     await restore_running_bots()
     asyncio.create_task(monitor_bots())
+    asyncio.create_task(auto_backup())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

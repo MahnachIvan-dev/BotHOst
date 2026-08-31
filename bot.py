@@ -1,10 +1,8 @@
 """
-🤖 BotHost — хостинг Telegram-ботов (Версия 4.2 — Cloud Backup)
-✅ Сохранение и восстановление базы через Telegram!
-✅ Система ПРОМОКОДОВ
-✅ Поддержка .zip архивов
-✅ Лимит 20 МБ
-✅ Ручное подтверждение оплат
+🤖 BotHost — хостинг Telegram-ботов (Финальная версия v4.4)
+✅ Гарантированный приём файлов (.zip / .py)
+✅ Подробное логирование всех входящих документов
+✅ Система ПРОМОКОДОВ и БЭКАПОВ
 """
 
 import os
@@ -276,7 +274,7 @@ def get_stats():
     }
 
 # ═══════════════════════════════════════════════════════════════
-# 🚀 УНИВЕРСАЛЬНЫЙ WRAPPER
+# 🚀 WRAPPER
 # ═══════════════════════════════════════════════════════════════
 
 WRAPPER_CODE = '''#!/usr/bin/env python3
@@ -434,7 +432,6 @@ async def restore_running_bots():
         await start_user_bot(bot_id)
 
 async def auto_backup():
-    """Отправляет базу данных владельцу каждые 24 часа"""
     while True:
         await asyncio.sleep(24 * 3600)
         try:
@@ -455,16 +452,15 @@ WELCOME_TEXT = """👋 <b>Привет, {name}!</b>
 
 ━━━━━━━━━━━━━━━━━━━━━━━
 🚀 <b>Особенности:</b>
-• Поддержка загрузки <b>.zip архивов</b>
-• Лимит до <b>20 МБ</b>
-• Авто-чтение <code>requirements.txt</code>
+• Загрузка <b>.zip архивов</b> и <b>.py файлов</b>
+• Автоустановка библиотек и <code>requirements.txt</code>
+• Лимит файлов до <b>20 МБ</b>
 ━━━━━━━━━━━━━━━━━━━━━━━
 
 🎁 <b>Как начать?</b>
-1️⃣ Купи слот или введи промокод
-2️⃣ Нажми «📤 Загрузить бота»
-3️⃣ Отправь ZIP-архив с твоим кодом
-4️⃣ Запусти бота!"""
+1️⃣ Купи слот или активируй промокод
+2️⃣ Просто <b>отправь мне файл бота</b> (.zip или .py)
+3️⃣ Укажи токен от @BotFather и запусти бота!"""
 
 def main_menu_kb(user_id):
     buttons = [
@@ -523,18 +519,128 @@ async def cmd_start(message: types.Message, state: FSMContext):
 async def cmd_cancel(message: types.Message, state: FSMContext):
     await state.clear(); await message.answer("❌ Действие отменено.")
 
-# --- ВОССТАНОВЛЕНИЕ БАЗЫ ДАННЫХ ИЗ ФАЙЛА (.DB) ---
-@dp.message(F.document, F.from_user.id == OWNER_ID)
-async def admin_db_restore(message: types.Message, state: FSMContext):
-    current_state = await state.get_state()
-    # Если мы не в состоянии загрузки бота, а админ кидает файл базы данных
-    if current_state is None and message.document.file_name.endswith(".db"):
-        await message.answer("⏳ Скачиваю новую базу данных...")
-        file_id = message.document.file_id
-        file = await bot.get_file(file_id)
-        await bot.download_file(file.file_path, destination=DB_PATH)
-        await message.answer("✅ <b>База данных успешно восстановлена!</b>\n\nСделайте рестарт ботов в админ-панели.", parse_mode="HTML")
-        return
+# ─── 📦 УНИВЕРСАЛЬНЫЙ ПЕРЕХВАТЧИК ФАЙЛОВ ─────────────────────
+
+@dp.message(F.document)
+async def handle_file_universal(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    if is_user_banned(user_id): return await message.answer("🚫 <b>Вы заблокированы</b>", parse_mode="HTML")
+
+    doc = message.document
+    filename = doc.file_name or "bot.zip"
+    ext = filename.lower().split('.')[-1]
+
+    logger.info(f"📥 [FILE RECEIVED] From user {user_id}: {filename} ({doc.file_size} bytes)")
+
+    # Восстановление БД для владельца
+    if user_id == OWNER_ID and ext == "db":
+        current_state = await state.get_state()
+        if current_state is None:
+            await message.answer("⏳ Скачиваю новую базу данных...")
+            file = await bot.get_file(doc.file_id)
+            await bot.download_file(file.file_path, destination=DB_PATH)
+            return await message.answer("✅ <b>База данных успешно восстановлена!</b>", parse_mode="HTML")
+
+    # Проверка наличия активного слота
+    if not has_active_slot(user_id):
+        return await message.answer(
+            "❌ <b>У тебя нет активного слота для загрузки ботов!</b>\n\n"
+            "Сначала купи слот или активируй промокод.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💎 Купить слот", callback_data="buy"),
+                 InlineKeyboardButton(text="🎟 Промокод", callback_data="promo_enter")]
+            ]),
+            parse_mode="HTML"
+        )
+
+    # Проверка формата
+    if ext not in ['py', 'txt', 'zip']:
+        return await message.answer("❌ Формат не поддерживается.\nОтправь <b>.py</b> файл или <b>.zip</b> архив с проектом.", parse_mode="HTML")
+
+    # Проверка размера
+    if doc.file_size and doc.file_size > 20 * 1024 * 1024:
+        return await message.answer("❌ Файл слишком большой. Максимальный размер 20 МБ.")
+
+    await state.update_data(file_id=doc.file_id, filename=filename, ext=ext)
+    await message.answer(
+        f"✅ <b>Файл {filename} принят!</b>\n\n"
+        f"Теперь отправь <b>токен бота</b> от @BotFather.\n"
+        f"Если токен не нужен — напиши: <code>none</code>\n\n"
+        f"🔒 <i>Сообщение с токеном будет сразу удалено.</i>",
+        parse_mode="HTML"
+    )
+    await state.set_state(UploadStates.waiting_token)
+
+# ─── FSM: ОБРАБОТКА ТОКЕНА ───────────────────────────────────
+
+@dp.message(UploadStates.waiting_token)
+async def handle_token(message: types.Message, state: FSMContext):
+    if not message.text: return await message.answer("⚠️ Отправь токен текстом или напиши <code>none</code>", parse_mode="HTML")
+
+    token = message.text.strip()
+    token_status = "🔐 Токен принят"
+    if token.lower() in ["none", "нет", "no", "-", "skip"]:
+        token = ""
+        token_status = "🚫 Без токена"
+
+    try: await message.delete()
+    except: pass
+
+    data = await state.get_data()
+    file_id = data.get("file_id")
+    ext = data.get("ext")
+    filename = data.get("filename")
+
+    if not file_id:
+        await state.clear(); return await message.answer("❌ Ошибка памяти. Отправь файл заново.")
+
+    await message.answer("⏳ <i>Распаковываем файлы на сервер... Это может занять несколько секунд.</i>", parse_mode="HTML")
+
+    try:
+        bot_id = save_bot(message.from_user.id, filename, token)
+        bot_dir = BOTS_DIR / f"bot_{bot_id}"
+        bot_dir.mkdir(parents=True, exist_ok=True)
+
+        file_info = await bot.get_file(file_id)
+        download_path = bot_dir / filename
+        await bot.download_file(file_info.file_path, destination=download_path)
+
+        entry_point = "user_bot.py"
+
+        if ext == "zip":
+            with zipfile.ZipFile(download_path, 'r') as zip_ref: zip_ref.extractall(bot_dir)
+            download_path.unlink()
+            
+            possible_names = ['main.py', 'bot.py', 'app.py', 'run.py']
+            found = False
+            for root, _, files in os.walk(bot_dir):
+                for p in possible_names:
+                    if p in files:
+                        rel_dir = os.path.relpath(root, bot_dir)
+                        entry_point = p if rel_dir == "." else f"{rel_dir}/{p}"
+                        found = True; break
+                if found: break
+            
+            if not found:
+                for root, _, files in os.walk(bot_dir):
+                    for f in files:
+                        if f.endswith(".py"):
+                            rel_dir = os.path.relpath(root, bot_dir)
+                            entry_point = f if rel_dir == "." else f"{rel_dir}/{f}"
+                            found = True; break
+                    if found: break
+        else:
+            download_path.rename(bot_dir / "user_bot.py")
+
+        wrapper_code = WRAPPER_CODE.replace("{{ENTRY_POINT}}", entry_point)
+        (bot_dir / "wrapper.py").write_text(wrapper_code, encoding="utf-8")
+
+        await message.answer(f"✅ <b>Бот успешно развёрнут!</b>\n\n🆔 ID: <code>{bot_id}</code>\n📁 Исполняемый файл: <code>{entry_point}</code>\nСтатус токена: {token_status}\n\n🚀 Зайди в <b>«🤖 Мои боты»</b> и нажми <b>▶️ Запуск</b>!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🤖 Мои боты", callback_data="mybots")]]), parse_mode="HTML")
+        await state.clear()
+    except Exception as e:
+        logger.error(f"Ошибка сохранения: {e}", exc_info=True)
+        await message.answer(f"❌ Произошла ошибка при сохранении/распаковке: {e}")
+        await state.clear()
 
 # ─── FSM: ПРОМОКОДЫ ДЛЯ ЮЗЕРА ─────────────
 
@@ -551,231 +657,12 @@ async def process_promo(message: types.Message, state: FSMContext):
     
     if success:
         plan_info = PLANS[result]
-        await message.answer(f"🎉 <b>Промокод активирован!</b>\n\nВы получили тариф: {plan_info['emoji']} <b>{plan_info['name']}</b> ({plan_info['days']} дней).\n\nТеперь вы можете загрузить своего бота!", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📤 Загрузить бота", callback_data="upload")], [InlineKeyboardButton(text="« Главное меню", callback_data="back_main")]]))
+        await message.answer(f"🎉 <b>Промокод активирован!</b>\n\nВы получили тариф: {plan_info['emoji']} <b>{plan_info['name']}</b> ({plan_info['days']} дней).\n\nТеперь вы можете отправлять файлы ботов в чат!", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📤 Загрузить бота", callback_data="upload")], [InlineKeyboardButton(text="« Главное меню", callback_data="back_main")]]))
     else:
         await message.answer(result, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« В меню", callback_data="back_main")]]))
     await state.clear()
 
-# ─── FSM: УНИВЕРСАЛЬНАЯ ЗАГРУЗКА (.ZIP / .PY) ─────────────
-
-@dp.message(UploadStates.waiting_file, F.document)
-
-# ═══════════════════════════════════════════════════════════════
-# 📤 ЗАГРУЗКА ФАЙЛОВ (исправлено: zip + токен + пересылки)
-# ═══════════════════════════════════════════════════════════════
-
-@dp.message(F.document)
-async def handle_any_document(message: types.Message, state: FSMContext):
-    """Ловит ЛЮБОЙ документ в личке — и по кнопке, и просто скинутый файл"""
-    if message.chat.type != "private":
-        return
-
-    user_id = message.from_user.id
-    if is_user_banned(user_id):
-        return await message.answer("🚫 Вы заблокированы")
-
-    doc = message.document
-    if not doc:
-        return await message.answer("❌ Не вижу файл. Пришли документ заново (не сжатое фото).")
-
-    filename = (doc.file_name or "bot.zip").strip()
-    # нормализуем имя (кириллица, длинное тире и т.д.)
-    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
-
-    # Владелец может восстановить БД файлом .db
-    if user_id == OWNER_ID and ext == "db":
-        await message.answer("⏳ Восстанавливаю базу...")
-        try:
-            file = await bot.get_file(doc.file_id)
-            await bot.download_file(file.file_path, destination=DB_PATH)
-            init_db()
-            return await message.answer("✅ База восстановлена!")
-        except Exception as e:
-            return await message.answer(f"❌ Ошибка: {e}")
-
-    if not has_active_slot(user_id):
-        return await message.answer(
-            "❌ Нет активного слота.\nСначала купи слот или введи промокод.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💎 Купить", callback_data="buy")],
-                [InlineKeyboardButton(text="🎟 Промокод", callback_data="promo_enter")],
-            ]),
-            parse_mode="HTML",
-        )
-
-    if ext not in ("py", "txt", "zip"):
-        return await message.answer(
-            f"❌ Формат <code>.{ext or '?'}</code> не поддерживается.\n"
-            f"Нужен <b>.py</b> или <b>.zip</b>\n\nФайл: <code>{html.escape(filename)}</code>",
-            parse_mode="HTML",
-        )
-
-    if doc.file_size and doc.file_size > 20 * 1024 * 1024:
-        return await message.answer("❌ Максимум 20 МБ")
-
-    await state.update_data(
-        file_id=doc.file_id,
-        filename=filename,
-        ext=ext,
-        file_size=doc.file_size or 0,
-    )
-    await state.set_state(UploadStates.waiting_token)
-
-    await message.answer(
-        f"✅ <b>Файл принят!</b>\n\n"
-        f"📁 <code>{html.escape(filename)}</code>\n"
-        f"📦 {ext.upper()} · {(doc.file_size or 0) / 1024:.1f} КБ\n\n"
-        f"Теперь отправь <b>токен</b> от @BotFather\n"
-        f"или напиши <code>none</code>, если токен не нужен.\n\n"
-        f"🔒 Сообщение с токеном удалю.",
-        parse_mode="HTML",
-    )
-
-
-@dp.message(UploadStates.waiting_token, F.text)
-async def handle_token(message: types.Message, state: FSMContext):
-    raw = (message.text or "").strip()
-    if not raw:
-        return await message.answer("⚠️ Пришли токен текстом или <code>none</code>", parse_mode="HTML")
-
-    if raw.lower() in ("none", "нет", "no", "-", "skip", "пропустить"):
-        token = ""
-        token_status = "🚫 Без токена"
-    elif ":" in raw and len(raw) >= 25:
-        token = raw
-        token_status = "🔐 Токен принят"
-    else:
-        return await message.answer(
-            "⚠️ Это не похоже на токен.\n"
-            "Формат: <code>123456:AAH...</code>\n"
-            "Или напиши <code>none</code>",
-            parse_mode="HTML",
-        )
-
-    # удаляем токен из чата
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-    data = await state.get_data()
-    file_id = data.get("file_id")
-    ext = data.get("ext")
-    filename = data.get("filename") or "bot.zip"
-
-    if not file_id:
-        await state.clear()
-        return await message.answer("❌ Файл потерялся. Скинь .zip/.py ещё раз.")
-
-    status_msg = await message.answer("⏳ Сохраняю и распаковываю на сервер...")
-
-    try:
-        bot_id = save_bot(message.from_user.id, filename, token)
-        bot_dir = BOTS_DIR / f"bot_{bot_id}"
-        bot_dir.mkdir(parents=True, exist_ok=True)
-
-        # безопасное имя на диске (без кириллицы в пути архива)
-        safe_name = f"upload.{ext}"
-        download_path = bot_dir / safe_name
-
-        file_info = await bot.get_file(file_id)
-        await bot.download_file(file_info.file_path, destination=download_path)
-
-        entry_point = "user_bot.py"
-
-        if ext == "zip":
-            with zipfile.ZipFile(download_path, "r") as zf:
-                # защита от zip-slip
-                for m in zf.namelist():
-                    p = (bot_dir / m).resolve()
-                    if not str(p).startswith(str(bot_dir.resolve())):
-                        raise RuntimeError("Небезопасный zip-архив")
-                zf.extractall(bot_dir)
-            try:
-                download_path.unlink()
-            except Exception:
-                pass
-
-            possible = ["main.py", "bot.py", "app.py", "run.py", "user_bot.py"]
-            found = None
-            for root, _, files in os.walk(bot_dir):
-                for name in possible:
-                    if name in files:
-                        rel = os.path.relpath(os.path.join(root, name), bot_dir)
-                        found = rel.replace("\\", "/")
-                        break
-                if found:
-                    break
-            if not found:
-                for root, _, files in os.walk(bot_dir):
-                    for f in files:
-                        if f.endswith(".py") and f != "wrapper.py":
-                            rel = os.path.relpath(os.path.join(root, f), bot_dir)
-                            found = rel.replace("\\", "/")
-                            break
-                    if found:
-                        break
-            if not found:
-                await state.clear()
-                return await status_msg.edit_text("❌ В архиве нет .py файлов!")
-            entry_point = found
-        else:
-            target = bot_dir / "user_bot.py"
-            if download_path != target:
-                if target.exists():
-                    target.unlink()
-                download_path.rename(target)
-            entry_point = "user_bot.py"
-
-        (bot_dir / "wrapper.py").write_text(
-            WRAPPER_CODE.replace("{{ENTRY_POINT}}", entry_point),
-            encoding="utf-8",
-        )
-
-        await state.clear()
-        await status_msg.edit_text(
-            f"✅ <b>Бот развёрнут!</b>\n\n"
-            f"🆔 ID: <code>{bot_id}</code>\n"
-            f"📁 {html.escape(filename)}\n"
-            f"▶ Запуск: <code>{html.escape(entry_point)}</code>\n"
-            f"{token_status}\n\n"
-            f"Открой «🤖 Мои боты» → ▶️ Запуск",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🤖 Мои боты", callback_data="mybots")]
-            ]),
-        )
-    except Exception as e:
-        logger.error("upload error: %s", e, exc_info=True)
-        await state.clear()
-        try:
-            await status_msg.edit_text(f"❌ Ошибка загрузки:\n<code>{html.escape(str(e))}</code>", parse_mode="HTML")
-        except Exception:
-            await message.answer(f"❌ Ошибка загрузки: {e}")
-
-
-@dp.message(UploadStates.waiting_file)
-async def waiting_file_hint(message: types.Message):
-    """Если ждали файл, а прислали текст"""
-    await message.answer(
-        "📎 Сейчас нужно отправить <b>файл</b>:\n"
-        "• <code>.py</code>\n• <code>.zip</code>\n\n"
-        "Не токен — сначала файл, потом токен.",
-        parse_mode="HTML",
-    )
-
-
-@dp.message(UploadStates.waiting_token)
-async def waiting_token_not_text(message: types.Message):
-    """Если ждали токен, а прислали снова файл/стикер"""
-    await message.answer(
-        "🔑 Сейчас нужен <b>токен</b> текстом\n"
-        "или <code>none</code>.\n\n"
-        "Если хочешь другой файл — /cancel и загрузи заново.",
-        parse_mode="HTML",
-    )
-
-# ─── Callback ─────────────────────────────────────────────
+# ─── Callback Handlers ─────────────────────────────────────
 
 @dp.callback_query(F.data == "back_main")
 async def cb_back_main(call: types.CallbackQuery, state: FSMContext):
@@ -833,22 +720,12 @@ async def cb_pay_done(call: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "upload")
 async def cb_upload(call: types.CallbackQuery, state: FSMContext):
-    if is_user_banned(call.from_user.id):
-        return await call.answer("🚫 Заблокированы", show_alert=True)
-    if not has_active_slot(call.from_user.id):
-        return await call.answer("❌ Нет слота!", show_alert=True)
+    if is_user_banned(call.from_user.id): return await call.answer("🚫 Заблокированы", show_alert=True)
+    if not has_active_slot(call.from_user.id): return await call.answer("❌ Нет активного слота!", show_alert=True)
 
+    await call.message.edit_text("📤 <b>Загрузка проекта</b>\n\nПросто <b>отправь мне в чат .py файл или .zip архив</b> с проектом.\n\n━━━━━━━━━━━━━━━\n\n📦 <b>Для архивов (.zip)</b>\nБот сам распакует файлы, найдёт <code>main.py</code> и установит библиотеки из <code>requirements.txt</code>!\n\n💡 Лимит файла: 20 МБ", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Отмена", callback_data="back_main")]]), parse_mode="HTML")
     await state.set_state(UploadStates.waiting_file)
-    await call.message.edit_text(
-        "📤 <b>Загрузка проекта</b>\n\n"
-        "Отправь <b>.py</b> или <b>.zip</b> сюда в чат.\n\n"
-        "Потом бот попросит токен (или <code>none</code>).\n"
-        "📏 До 20 МБ",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="« Отмена", callback_data="back_main")]
-        ]),
-        parse_mode="HTML",
-    )
+
 @dp.callback_query(F.data == "mybots")
 async def cb_mybots(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -941,9 +818,8 @@ async def cb_myslots(call: types.CallbackQuery, state: FSMContext):
 async def cb_help(call: types.CallbackQuery, state: FSMContext):
     await state.clear()
     text = ("❓ <b>Помощь</b>\n\n<b>🎁 Как начать:</b>\n1. Нажми «💎 Купить слот» или введи промокод\n2. Отправь подарок владельцу (если покупаешь)\n"
-            "3. Дождись подтверждения\n\n<b>📤 Загрузить бота:</b>\n1. Нажми «📤 Загрузить бота»\n"
-            "2. Отправь .py файл или <b>.zip архив</b>\n3. Отправь токен (или 'none')\n4. Запусти через «🤖 Мои боты»\n\n"
-            "💡 <i>В ZIP архив можно добавить файл <code>requirements.txt</code> — хостинг сам установит нужные пакеты!</i>")
+            "3. Дождись подтверждения\n\n<b>📤 Загрузить бота:</b>\n1. Просто скинь мне .py файл или <b>.zip архив</b>\n"
+            "2. Укажи токен (или 'none')\n3. Запусти через «🤖 Мои боты»")
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👤 Владелец", url=get_profile_link())], [InlineKeyboardButton(text="« Меню", callback_data="back_main")]]), parse_mode="HTML", disable_web_page_preview=True)
 
 # ═══════════════════════════════════════════════════════════════
@@ -985,8 +861,6 @@ async def cb_adm_backup(call: types.CallbackQuery):
         await call.answer("✅ Бэкап отправлен!")
     else:
         await call.answer("❌ Файл базы не найден!", show_alert=True)
-
-# --- АДМИНКА ПРОМОКОДОВ ---
 
 @dp.callback_query(F.data == "adm:promos")
 async def cb_adm_promos(call: types.CallbackQuery):
@@ -1045,8 +919,6 @@ async def cb_adm_promo_del(call: types.CallbackQuery):
     delete_promo(int(call.data.split(":")[2]))
     await call.answer("🗑 Удалено!")
     await cb_adm_promos(call)
-
-# --- ОСТАЛЬНЫЕ КОМАНДЫ АДМИНА ---
 
 @dp.callback_query(F.data == "adm:payments")
 async def cb_adm_payments(call: types.CallbackQuery):
@@ -1173,7 +1045,7 @@ async def cb_restart_all(call: types.CallbackQuery):
 async def main():
     init_db()
     logger.info("=" * 50)
-    logger.info("🤖 BotHost v4.2 (Cloud Backup & Promos) запущен")
+    logger.info("🤖 BotHost v4.4 (Universal Fix) запущен")
     logger.info(f"👤 Владелец: {OWNER_ID}")
     logger.info("=" * 50)
 

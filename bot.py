@@ -797,7 +797,7 @@ async def cb_downlog(call: types.CallbackQuery):
 async def cb_files(call: types.CallbackQuery):
     bid = int(call.data.split(":")[1]); files = list_bot_files(bid)
     if not files:
-        return await call.message.edit_text("📁 <b>Файлов нет.</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➕ Добавить файл", callback_data=f"addfile:{bid}")],[InlineKeyboardButton(text="« К боту", callback_data=f"bot:{bid}")] Grac]), parse_mode="HTML")
+        return await call.message.edit_text("📁 <b>Файлов нет.</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➕ Добавить файл", callback_data=f"addfile:{bid}")],[InlineKeyboardButton(text="« К боту", callback_data=f"bot:{bid}")] ]), parse_mode="HTML")
     text = f"📁 <b>Файлы бота #{bid}:</b>\n\n"; kb = []
     for i, (fn, sz) in enumerate(files[:15]):
         text += f"• <code>{html.escape(fn)}</code> ({sz/1024:.1f} KB)\n"

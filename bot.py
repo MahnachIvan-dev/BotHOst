@@ -1,6 +1,7 @@
 """
 🤖 BotHost v6.0 Ultimate (AI & GodMode & Env Manager)
 ✅ ПОЛНЫЙ ФУНКЦИОНАЛ: Все старые + все новые фичи
+✅ Безопасный запуск ИИ (защита от крашей при конфликтах библиотек)
 ✅ Авто-бэкапы БД раз в сутки + ручной скач бэкапа админом
 ✅ Подтверждение оплаты (звёзды/подарки) и система слотов
 ✅ Промокоды (создание, удаление, использование)
@@ -69,7 +70,14 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 running_bots: Dict[int, subprocess.Popen] = {}
 
-groq_client = AsyncGroq(api_key=GROQ_API_KEY) if (GROQ_AVAILABLE and GROQ_API_KEY) else None
+# Безопасная инициализация Groq (не уронит бота даже при ошибках библиотек)
+groq_client = None
+if GROQ_AVAILABLE and GROQ_API_KEY:
+    try:
+        groq_client = AsyncGroq(api_key=GROQ_API_KEY)
+    except Exception as e:
+        logger.error(f"⚠️ Не удалось инициализировать Groq API: {e}")
+        groq_client = None
 
 # ═══════════════════════════════════════════════════════════════
 # 💾 БАЗА ДАННЫХ
@@ -457,7 +465,7 @@ async def auto_backup():
 # ═══════════════════════════════════════════════════════════════
 
 async def analyze_with_groq(logs):
-    if not groq_client: return "❌ **AI-дебаггер недоступен.**\nНа сервере не настроен `GROQ_API_KEY`."
+    if not groq_client: return "❌ **AI-дебаггер недоступен.**\nНа сервере не настроен или временно не работает `GROQ_API_KEY`."
     if not logs.strip(): return "📭 Логи пустые, нечего анализировать."
 
     system_prompt = (

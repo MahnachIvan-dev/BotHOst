@@ -1,14 +1,5 @@
 """
-🤖 BotHost v6.0 Ultimate (AI & GodMode & Env Manager)
-✅ ПОЛНЫЙ ФУНКЦИОНАЛ: Все старые + все новые фичи
-✅ Безопасный запуск ИИ (защита от крашей при конфликтах библиотек)
-✅ Авто-бэкапы БД раз в сутки + ручной скач бэкапа админом
-✅ Подтверждение оплаты (звёзды/подарки) и система слотов
-✅ Промокоды (создание, удаление, использование)
-✅ ИИ-дебаггер ошибок на базе Groq (Llama-3-70B)
-✅ Управление файлами бота + редактирование .env
-✅ God Mode для админа: доступ ко ВСЕМ ботам и файлам на хосте
-✅ Фоновый мониторинг падений и авто-перезапуск при рестарте
+🤖 BotHost v7.0 Ecosystem (AI Debugger, Auto-Restart, AI Cashier Integration)
 """
 
 import os
@@ -48,6 +39,8 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8711311188:AAHnhjvLhyYASMxUI-1hLyktHXhS
 OWNER_ID = int(os.environ.get("OWNER_ID", "8269807543"))
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "ivan_unreal")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+# Впиши юзернейм твоего нового бота-кассира (без @)
+VERIFIER_BOT_USERNAME = os.environ.get("VERIFIER_BOT", "BotHostoplatiBot") 
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/app/data"))
 BOTS_DIR = DATA_DIR / "bots"
@@ -70,14 +63,10 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 running_bots: Dict[int, subprocess.Popen] = {}
 
-# Безопасная инициализация Groq (не уронит бота даже при ошибках библиотек)
 groq_client = None
 if GROQ_AVAILABLE and GROQ_API_KEY:
-    try:
-        groq_client = AsyncGroq(api_key=GROQ_API_KEY)
-    except Exception as e:
-        logger.error(f"⚠️ Не удалось инициализировать Groq API: {e}")
-        groq_client = None
+    try: groq_client = AsyncGroq(api_key=GROQ_API_KEY)
+    except Exception as e: logger.error(f"⚠️ Ошибка ИИ (Groq): {e}")
 
 # ═══════════════════════════════════════════════════════════════
 # 💾 БАЗА ДАННЫХ
@@ -87,190 +76,65 @@ def init_db():
     conn = sqlite3.connect(DB_PATH); c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, full_name TEXT, is_admin INTEGER DEFAULT 0, is_banned INTEGER DEFAULT 0, created_at TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS slots (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, plan TEXT, expires_at TEXT, created_at TEXT, gift_id TEXT)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS bots (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, filename TEXT, bot_token TEXT, status TEXT DEFAULT 'stopped', created_at TEXT, is_frozen INTEGER DEFAULT 0, entry_point TEXT DEFAULT 'user_bot.py')""")
+    c.execute("""CREATE TABLE IF NOT EXISTS bots (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, filename TEXT, bot_token TEXT, status TEXT DEFAULT 'stopped', created_at TEXT, is_frozen INTEGER DEFAULT 0, entry_point TEXT DEFAULT 'user_bot.py', auto_restart INTEGER DEFAULT 0)""")
     c.execute("""CREATE TABLE IF NOT EXISTS payment_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, full_name TEXT, plan TEXT, status TEXT DEFAULT 'pending', created_at TEXT, processed_at TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS promocodes (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE, plan TEXT, uses_left INTEGER, created_at TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS used_promos (user_id INTEGER, promo_id INTEGER, UNIQUE(user_id, promo_id))""")
-    try: c.execute("ALTER TABLE bots ADD COLUMN is_frozen INTEGER DEFAULT 0")
-    except: pass
-    try: c.execute("ALTER TABLE bots ADD COLUMN entry_point TEXT DEFAULT 'user_bot.py'")
+    try: c.execute("ALTER TABLE bots ADD COLUMN auto_restart INTEGER DEFAULT 0")
     except: pass
     conn.commit(); conn.close()
 
 def get_db(): return sqlite3.connect(DB_PATH)
-
 def create_user(uid, uname, fname=""):
     conn = get_db(); c = conn.cursor()
     c.execute("INSERT INTO users (user_id, username, full_name, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET username = ?, full_name = ?", (uid, uname, fname, datetime.now().isoformat(), uname, fname))
     conn.commit(); conn.close()
-
-def get_user(uid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE user_id = ?", (uid,))
-    r = c.fetchone(); conn.close(); return r
-
-def get_all_users():
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT * FROM users ORDER BY created_at DESC")
-    r = c.fetchall(); conn.close(); return r
-
-def find_user_by_username(uname):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT user_id FROM users WHERE LOWER(username) = ?", (uname.lstrip("@").lower(),))
-    r = c.fetchone(); conn.close(); return r[0] if r else None
-
-def is_user_banned(uid):
-    if uid == OWNER_ID: return False
-    u = get_user(uid)
-    return bool(u and u[4])
-
-def ban_user(uid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE users SET is_banned = 1 WHERE user_id = ?", (uid,))
-    conn.commit(); conn.close()
-
-def unban_user(uid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE users SET is_banned = 0 WHERE user_id = ?", (uid,))
-    conn.commit(); conn.close()
-
-def is_admin(uid):
-    if uid == OWNER_ID: return True
-    u = get_user(uid)
-    return bool(u and u[3])
-
-def add_admin(uid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (user_id, created_at) VALUES (?, ?)", (uid, datetime.now().isoformat()))
-    c.execute("UPDATE users SET is_admin = 1 WHERE user_id = ?", (uid,))
-    conn.commit(); conn.close()
-
-def remove_admin(uid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE users SET is_admin = 0 WHERE user_id = ?", (uid,))
-    conn.commit(); conn.close()
-
-def get_all_admins():
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT user_id, username, full_name FROM users WHERE is_admin = 1 AND user_id != ?", (OWNER_ID,))
-    r = c.fetchall(); conn.close(); return r
-
+def get_user(uid): conn = get_db(); c = conn.cursor(); c.execute("SELECT * FROM users WHERE user_id = ?", (uid,)); r = c.fetchone(); conn.close(); return r
+def get_all_users(): conn = get_db(); c = conn.cursor(); c.execute("SELECT * FROM users ORDER BY created_at DESC"); r = c.fetchall(); conn.close(); return r
+def find_user_by_username(uname): conn = get_db(); c = conn.cursor(); c.execute("SELECT user_id FROM users WHERE LOWER(username) = ?", (uname.lstrip("@").lower(),)); r = c.fetchone(); conn.close(); return r[0] if r else None
+def is_user_banned(uid): return False if uid == OWNER_ID else bool((get_user(uid) or [0,0,0,0,0])[4])
+def ban_user(uid): conn = get_db(); c = conn.cursor(); c.execute("UPDATE users SET is_banned = 1 WHERE user_id = ?", (uid,)); conn.commit(); conn.close()
+def unban_user(uid): conn = get_db(); c = conn.cursor(); c.execute("UPDATE users SET is_banned = 0 WHERE user_id = ?", (uid,)); conn.commit(); conn.close()
+def is_admin(uid): return True if uid == OWNER_ID else bool((get_user(uid) or [0,0,0,0])[3])
+def add_admin(uid): conn = get_db(); c = conn.cursor(); c.execute("INSERT OR IGNORE INTO users (user_id, created_at) VALUES (?, ?)", (uid, datetime.now().isoformat())); c.execute("UPDATE users SET is_admin = 1 WHERE user_id = ?", (uid,)); conn.commit(); conn.close()
+def remove_admin(uid): conn = get_db(); c = conn.cursor(); c.execute("UPDATE users SET is_admin = 0 WHERE user_id = ?", (uid,)); conn.commit(); conn.close()
+def get_all_admins(): conn = get_db(); c = conn.cursor(); c.execute("SELECT user_id, username, full_name FROM users WHERE is_admin = 1 AND user_id != ?", (OWNER_ID,)); r = c.fetchall(); conn.close(); return r
 def has_active_slot(uid):
     if is_admin(uid): return True
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM slots WHERE user_id = ? AND expires_at > ?", (uid, datetime.now().isoformat()))
-    r = c.fetchone()[0]; conn.close(); return r > 0
-
+    conn = get_db(); c = conn.cursor(); c.execute("SELECT COUNT(*) FROM slots WHERE user_id = ? AND expires_at > ?", (uid, datetime.now().isoformat())); r = c.fetchone()[0]; conn.close(); return r > 0
 def get_active_slots(uid):
     if is_admin(uid): return [(0, uid, "month", "2099-12-31", datetime.now().isoformat(), "admin")]
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT * FROM slots WHERE user_id = ? AND expires_at > ?", (uid, datetime.now().isoformat()))
-    r = c.fetchall(); conn.close(); return r
-
+    conn = get_db(); c = conn.cursor(); c.execute("SELECT * FROM slots WHERE user_id = ? AND expires_at > ?", (uid, datetime.now().isoformat())); r = c.fetchall(); conn.close(); return r
 def create_slot(uid, plan):
     exp = datetime.now() + timedelta(days=PLANS[plan]["days"])
-    conn = get_db(); c = conn.cursor()
-    c.execute("INSERT INTO slots (user_id, plan, expires_at, created_at) VALUES (?, ?, ?, ?)", (uid, plan, exp.isoformat(), datetime.now().isoformat()))
-    conn.commit(); conn.close()
-
+    conn = get_db(); c = conn.cursor(); c.execute("INSERT INTO slots (user_id, plan, expires_at, created_at) VALUES (?, ?, ?, ?)", (uid, plan, exp.isoformat(), datetime.now().isoformat())); conn.commit(); conn.close()
 def save_bot(uid, fname, token, ep="user_bot.py"):
-    conn = get_db(); c = conn.cursor()
-    c.execute("INSERT INTO bots (user_id, filename, bot_token, created_at, entry_point) VALUES (?, ?, ?, ?, ?)", (uid, fname, token, datetime.now().isoformat(), ep))
-    bid = c.lastrowid; conn.commit(); conn.close(); return bid
-
-def get_user_bots(uid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT * FROM bots WHERE user_id = ?", (uid,))
-    r = c.fetchall(); conn.close(); return r
-
-def get_bot(bid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT * FROM bots WHERE id = ?", (bid,))
-    r = c.fetchone(); conn.close(); return r
-
-def get_all_bots():
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT * FROM bots")
-    r = c.fetchall(); conn.close(); return r
-
-def update_bot_entry(bid, ep):
-    conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE bots SET entry_point = ? WHERE id = ?", (ep, bid))
-    conn.commit(); conn.close()
-
-def freeze_bot(bid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE bots SET is_frozen = 1 WHERE id = ?", (bid,))
-    conn.commit(); conn.close()
-
-def unfreeze_bot(bid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE bots SET is_frozen = 0 WHERE id = ?", (bid,))
-    conn.commit(); conn.close()
-
-def delete_bot_record(bid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("DELETE FROM bots WHERE id = ?", (bid,))
-    conn.commit(); conn.close()
-
-def create_payment_request(uid, uname, fname, plan):
-    conn = get_db(); c = conn.cursor()
-    c.execute("INSERT INTO payment_requests (user_id, username, full_name, plan, created_at) VALUES (?, ?, ?, ?, ?)", (uid, uname, fname, plan, datetime.now().isoformat()))
-    rid = c.lastrowid; conn.commit(); conn.close(); return rid
-
-def get_pending_requests():
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT * FROM payment_requests WHERE status = 'pending' ORDER BY created_at ASC")
-    r = c.fetchall(); conn.close(); return r
-
-def get_payment_request(rid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT * FROM payment_requests WHERE id = ?", (rid,))
-    r = c.fetchone(); conn.close(); return r
-
-def approve_payment(rid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE payment_requests SET status = 'approved', processed_at = ? WHERE id = ?", (datetime.now().isoformat(), rid))
-    conn.commit(); conn.close()
-
-def reject_payment(rid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE payment_requests SET status = 'rejected', processed_at = ? WHERE id = ?", (datetime.now().isoformat(), rid))
-    conn.commit(); conn.close()
-
-def user_has_pending_request(uid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM payment_requests WHERE user_id = ? AND status = 'pending'", (uid,))
-    r = c.fetchone()[0]; conn.close(); return r > 0
-
+    conn = get_db(); c = conn.cursor(); c.execute("INSERT INTO bots (user_id, filename, bot_token, created_at, entry_point) VALUES (?, ?, ?, ?, ?)", (uid, fname, token, datetime.now().isoformat(), ep)); bid = c.lastrowid; conn.commit(); conn.close(); return bid
+def get_user_bots(uid): conn = get_db(); c = conn.cursor(); c.execute("SELECT * FROM bots WHERE user_id = ?", (uid,)); r = c.fetchall(); conn.close(); return r
+def get_bot(bid): conn = get_db(); c = conn.cursor(); c.execute("SELECT * FROM bots WHERE id = ?", (bid,)); r = c.fetchone(); conn.close(); return r
+def get_all_bots(): conn = get_db(); c = conn.cursor(); c.execute("SELECT * FROM bots"); r = c.fetchall(); conn.close(); return r
+def update_bot_entry(bid, ep): conn = get_db(); c = conn.cursor(); c.execute("UPDATE bots SET entry_point = ? WHERE id = ?", (ep, bid)); conn.commit(); conn.close()
+def toggle_auto_restart(bid, val): conn = get_db(); c = conn.cursor(); c.execute("UPDATE bots SET auto_restart = ? WHERE id = ?", (val, bid)); conn.commit(); conn.close()
+def freeze_bot(bid): conn = get_db(); c = conn.cursor(); c.execute("UPDATE bots SET is_frozen = 1 WHERE id = ?", (bid,)); conn.commit(); conn.close()
+def unfreeze_bot(bid): conn = get_db(); c = conn.cursor(); c.execute("UPDATE bots SET is_frozen = 0 WHERE id = ?", (bid,)); conn.commit(); conn.close()
+def delete_bot_record(bid): conn = get_db(); c = conn.cursor(); c.execute("DELETE FROM bots WHERE id = ?", (bid,)); conn.commit(); conn.close()
+def create_payment_request(uid, uname, fname, plan): conn = get_db(); c = conn.cursor(); c.execute("INSERT INTO payment_requests (user_id, username, full_name, plan, created_at) VALUES (?, ?, ?, ?, ?)", (uid, uname, fname, plan, datetime.now().isoformat())); rid = c.lastrowid; conn.commit(); conn.close(); return rid
+def get_pending_requests(): conn = get_db(); c = conn.cursor(); c.execute("SELECT * FROM payment_requests WHERE status = 'pending' ORDER BY created_at ASC"); r = c.fetchall(); conn.close(); return r
+def get_payment_request(rid): conn = get_db(); c = conn.cursor(); c.execute("SELECT * FROM payment_requests WHERE id = ?", (rid,)); r = c.fetchone(); conn.close(); return r
+def approve_payment(rid): conn = get_db(); c = conn.cursor(); c.execute("UPDATE payment_requests SET status = 'approved', processed_at = ? WHERE id = ?", (datetime.now().isoformat(), rid)); conn.commit(); conn.close()
+def reject_payment(rid): conn = get_db(); c = conn.cursor(); c.execute("UPDATE payment_requests SET status = 'rejected', processed_at = ? WHERE id = ?", (datetime.now().isoformat(), rid)); conn.commit(); conn.close()
+def user_has_pending_request(uid): conn = get_db(); c = conn.cursor(); c.execute("SELECT COUNT(*) FROM payment_requests WHERE user_id = ? AND status = 'pending'", (uid,)); r = c.fetchone()[0]; conn.close(); return r > 0
 def create_promo(code, plan, uses):
-    conn = get_db(); c = conn.cursor()
-    try:
-        c.execute("INSERT INTO promocodes (code, plan, uses_left, created_at) VALUES (?, ?, ?, ?)", (code, plan, uses, datetime.now().isoformat()))
-        conn.commit(); conn.close(); return True
-    except:
-        conn.close(); return False
-
-def get_all_promos():
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT id, code, plan, uses_left FROM promocodes WHERE uses_left > 0")
-    r = c.fetchall(); conn.close(); return r
-
-def delete_promo(pid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("DELETE FROM promocodes WHERE id = ?", (pid,))
-    conn.commit(); conn.close()
-
+    try: conn = get_db(); c = conn.cursor(); c.execute("INSERT INTO promocodes (code, plan, uses_left, created_at) VALUES (?, ?, ?, ?)", (code, plan, uses, datetime.now().isoformat())); conn.commit(); conn.close(); return True
+    except: return False
+def get_all_promos(): conn = get_db(); c = conn.cursor(); c.execute("SELECT id, code, plan, uses_left FROM promocodes WHERE uses_left > 0"); r = c.fetchall(); conn.close(); return r
+def delete_promo(pid): conn = get_db(); c = conn.cursor(); c.execute("DELETE FROM promocodes WHERE id = ?", (pid,)); conn.commit(); conn.close()
 def use_promo(uid, code):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT id, plan, uses_left FROM promocodes WHERE code = ?", (code,))
-    p = c.fetchone()
+    conn = get_db(); c = conn.cursor(); c.execute("SELECT id, plan, uses_left FROM promocodes WHERE code = ?", (code,)); p = c.fetchone()
     if not p or p[2] <= 0: conn.close(); return False, "❌ Промокод не найден или закончился."
     c.execute("SELECT 1 FROM used_promos WHERE user_id = ? AND promo_id = ?", (uid, p[0]))
     if c.fetchone(): conn.close(); return False, "⚠️ Ты уже использовал этот промокод."
-    c.execute("UPDATE promocodes SET uses_left = uses_left - 1 WHERE id = ?", (p[0],))
-    c.execute("INSERT INTO used_promos (user_id, promo_id) VALUES (?, ?)", (uid, p[0]))
-    conn.commit(); conn.close(); create_slot(uid, p[1]); return True, p[1]
+    c.execute("UPDATE promocodes SET uses_left = uses_left - 1 WHERE id = ?", (p[0],)); c.execute("INSERT INTO used_promos (user_id, promo_id) VALUES (?, ?)", (uid, p[0])); conn.commit(); conn.close(); create_slot(uid, p[1]); return True, p[1]
 
 def get_stats():
     conn = get_db(); c = conn.cursor()
@@ -287,17 +151,15 @@ def get_stats():
     conn.close(); return r
 
 # ═══════════════════════════════════════════════════════════════
-# 🛡 MIDDLEWARE
+# 🛡 ГЛОБАЛЬНЫЙ БАН
 # ═══════════════════════════════════════════════════════════════
 
 class BanMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         u = data.get("event_from_user")
         if u and is_user_banned(u.id):
-            if isinstance(event, types.Message):
-                await event.answer("🚫 <b>Вы заблокированы на хостинге.</b>", parse_mode="HTML")
-            elif isinstance(event, types.CallbackQuery):
-                await event.answer("🚫 Вы заблокированы", show_alert=True)
+            if isinstance(event, types.Message): await event.answer("🚫 <b>Вы заблокированы на хостинге.</b>", parse_mode="HTML")
+            elif isinstance(event, types.CallbackQuery): await event.answer("🚫 Вы заблокированы", show_alert=True)
             return
         return await handler(event, data)
 
@@ -305,23 +167,22 @@ dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
 
 # ═══════════════════════════════════════════════════════════════
-# 🚀 WRAPPER И МОНИТОРИНГ
+# 🚀 ОБЁРТКА И ЗАПУСК (С ИСПРАВЛЕННЫМИ ЛОГАМИ)
 # ═══════════════════════════════════════════════════════════════
 
 WRAPPER_CODE = '''#!/usr/bin/env python3
-import os, sys, re, signal, subprocess, time
+import os, sys, subprocess, time, signal
 
 ENTRY_POINT = "{{ENTRY_POINT}}"
-
-def log(msg): print(f"[BotHost] {msg}", flush=True)
+print(f"\\n[ BotHost ] Подготовка проекта... Точка входа: {ENTRY_POINT}", flush=True)
 
 if os.path.exists("requirements.txt"):
-    log("📦 Установка пакетов из requirements.txt...")
+    print("[ BotHost ] Установка библиотек из requirements.txt...", flush=True)
     subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet", "--no-cache-dir"])
 
 process = None
 def handle_signal(signum, frame):
-    log("Выключение...")
+    print("\\n[ BotHost ] Сигнал остановки получен...", flush=True)
     if process:
         process.terminate()
         try: process.wait(timeout=5)
@@ -332,12 +193,14 @@ signal.signal(signal.SIGTERM, handle_signal)
 signal.signal(signal.SIGINT, handle_signal)
 
 if not os.path.exists(ENTRY_POINT):
-    log(f"ОШИБКА: Файл {ENTRY_POINT} не найден!"); sys.exit(1)
+    print(f"\\n[ BotHost ] ОШИБКА: Файл {ENTRY_POINT} не найден!", flush=True)
+    sys.exit(1)
 
-log(f"🚀 Запуск процесса: {ENTRY_POINT}")
+print(f"[ BotHost ] Запуск основного кода...", flush=True)
 sys.stdout.flush()
 
 env = os.environ.copy()
+env["PYTHONUNBUFFERED"] = "1"
 if os.path.exists(".env"):
     with open(".env", "r", encoding="utf-8") as f:
         for line in f:
@@ -345,10 +208,12 @@ if os.path.exists(".env"):
                 k, v = line.strip().split("=", 1)
                 env[k] = v.strip("'\\"")
 
-process = subprocess.Popen([sys.executable, "-u", ENTRY_POINT], env=env)
+process = subprocess.Popen([sys.executable, "-u", ENTRY_POINT], env=env, stdout=sys.stdout, stderr=subprocess.STDOUT)
 while True:
     ret = process.poll()
-    if ret is not None: sys.exit(ret)
+    if ret is not None:
+        print(f"\\n[ BotHost ] Процесс завершился с кодом {ret}", flush=True)
+        sys.exit(ret)
     time.sleep(1)
 '''
 
@@ -360,17 +225,25 @@ async def start_user_bot(bot_id):
         b = get_bot(bot_id)
         if not b or b[6] == 1: return False
         bot_dir = BOTS_DIR / f"bot_{bot_id}"
+        bot_dir.mkdir(parents=True, exist_ok=True)
         log_file = bot_dir / "bot.log"
         
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"\n[{datetime.now().strftime('%d.%m %H:%M:%S')}] === ЗАПУСК БОТА #{bot_id} ===\n")
+            f.flush()
+
         env = os.environ.copy()
         if b[3]: env["BOT_TOKEN"] = b[3]
         env["PYTHONUNBUFFERED"] = "1"
 
-        with open(log_file, "w", encoding="utf-8") as lf:
-            proc = subprocess.Popen([sys.executable, "-u", "wrapper.py"], cwd=str(bot_dir), env=env, stdout=lf, stderr=subprocess.STDOUT, start_new_session=True)
+        lf = open(log_file, "a", encoding="utf-8")
+        proc = subprocess.Popen(
+            [sys.executable, "-u", "wrapper.py"],
+            cwd=str(bot_dir), env=env, stdout=lf, stderr=subprocess.STDOUT, start_new_session=True
+        )
 
         running_bots[bot_id] = proc
-        await asyncio.sleep(5)
+        await asyncio.sleep(4)
         if proc.poll() is not None:
             del running_bots[bot_id]
             conn = get_db(); c = conn.cursor()
@@ -382,14 +255,14 @@ async def start_user_bot(bot_id):
         c.execute("UPDATE bots SET status = 'running' WHERE id = ?", (bot_id,))
         conn.commit(); conn.close()
         return True
-    except: return False
+    except Exception as e:
+        logger.error(f"start_user_bot error #{bot_id}: {e}")
+        return False
 
 async def stop_user_bot(bot_id):
     if bot_id in running_bots:
         proc = running_bots.pop(bot_id)
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            proc.wait(timeout=3)
+        try: os.killpg(os.getpgid(proc.pid), signal.SIGTERM); proc.wait(timeout=3)
         except:
             try: os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except: pass
@@ -401,8 +274,10 @@ def get_bot_logs(bot_id, lines=50):
     lf = BOTS_DIR / f"bot_{bot_id}" / "bot.log"
     if not lf.exists(): return ""
     try:
-        return "\n".join(lf.read_text(encoding="utf-8", errors="ignore").strip().split("\n")[-lines:])
-    except: return ""
+        content = lf.read_text(encoding="utf-8", errors="ignore").strip()
+        if not content: return ""
+        return "\n".join(content.split("\n")[-lines:])
+    except Exception as e: return f"Ошибка чтения логов: {e}"
 
 def list_bot_files(bot_id):
     bot_dir = BOTS_DIR / f"bot_{bot_id}"
@@ -427,13 +302,21 @@ async def monitor_bots():
                     del running_bots[bot_id]
                     conn = get_db(); c = conn.cursor()
                     c.execute("UPDATE bots SET status = 'error' WHERE id = ?", (bot_id,))
-                    c.execute("SELECT user_id FROM bots WHERE id = ?", (bot_id,))
+                    c.execute("SELECT user_id, auto_restart FROM bots WHERE id = ?", (bot_id,))
                     row = c.fetchone(); conn.commit(); conn.close()
 
-                    if row and row[0] != OWNER_ID:
-                        logs = get_bot_logs(bot_id, 10)
-                        try: await bot.send_message(row[0], f"⚠️ <b>Бот #{bot_id} упал!</b>\nКод: {code}\n<pre>{html.escape(logs[-500:])}</pre>", parse_mode="HTML")
-                        except: pass
+                    if row:
+                        uid, auto_restart = row
+                        if auto_restart == 1 and not is_user_banned(uid):
+                            try: await bot.send_message(uid, f"⚠️ <b>Бот #{bot_id} упал (код {code}).</b>\n🔄 <i>Авто-рестарт включён, пытаюсь поднять...</i>", parse_mode="HTML")
+                            except: pass
+                            await asyncio.sleep(5)
+                            await start_user_bot(bot_id)
+                        else:
+                            if uid != OWNER_ID:
+                                logs = get_bot_logs(bot_id, 15)
+                                try: await bot.send_message(uid, f"⚠️ <b>Бот #{bot_id} упал!</b>\nКод: {code}\n<pre>{html.escape(logs[-500:])}</pre>", parse_mode="HTML")
+                                except: pass
                 else:
                     b = get_bot(bot_id)
                     if b:
@@ -441,7 +324,7 @@ async def monitor_bots():
                         if b[6] == 1 or is_user_banned(uid) or (uid != OWNER_ID and not is_admin(uid) and not has_active_slot(uid)):
                             await stop_user_bot(bot_id)
         except Exception as e: logger.error(f"monitor error: {e}")
-        await asyncio.sleep(30)
+        await asyncio.sleep(20)
 
 async def restore_running_bots():
     conn = get_db(); c = conn.cursor()
@@ -460,14 +343,9 @@ async def auto_backup():
                 await bot.send_document(OWNER_ID, FSInputFile(DB_PATH, filename=f"bothost_backup_{datetime.now().strftime('%Y%m%d')}.db"), caption="🔄 Автоматический суточный бэкап базы данных.")
         except: pass
 
-# ═══════════════════════════════════════════════════════════════
-# 🧠 AI ИИ-ДЕБАГГЕР (GROQ)
-# ═══════════════════════════════════════════════════════════════
-
 async def analyze_with_groq(logs):
-    if not groq_client: return "❌ **AI-дебаггер недоступен.**\nНа сервере не настроен или временно не работает `GROQ_API_KEY`."
+    if not groq_client: return "❌ **AI-дебаггер недоступен.**\nОтсутствует ключ `GROQ_API_KEY`."
     if not logs.strip(): return "📭 Логи пустые, нечего анализировать."
-
     system_prompt = (
         "Ты — опытный Python разработчик хостинга BotHost. Проанализируй лог ошибки бота и помоги пользователю её исправить.\n"
         "Отвечай строго в формате HTML:\n"
@@ -475,16 +353,13 @@ async def analyze_with_groq(logs):
         "2. <b>📍 Где проблема:</b> (Укажи файл и строку, если есть)\n"
         "3. <b>💡 Как исправить:</b> (Дай готовый код или команду)"
     )
-
     try:
         response = await groq_client.chat.completions.create(
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": f"Лог:\n\n{logs[-2500:]}"}],
             model="llama3-70b-8192", temperature=0.2
         )
         return response.choices[0].message.content
-    except Exception as e: return f"❌ Ошибка нейросети: {e}"
-
-# ═══════════════════════════════════════════════════════════════
+    except Exception as e: return f"❌ Ошибка нейросети: {e}"# ═══════════════════════════════════════════════════════════════
 # 📝 FSM И СОСТОЯНИЯ
 # ═══════════════════════════════════════════════════════════════
 
@@ -496,6 +371,7 @@ class AdminStates(StatesGroup):
     broadcast = State(); msg_uid = State(); msg_text = State()
     view_user = State(); addadmin = State(); ban = State(); unban = State()
     promo_code = State(); promo_uses = State()
+    search_bot = State() # Поиск бота по ID
 
 # ═══════════════════════════════════════════════════════════════
 # 📱 ИНТЕРФЕЙС И КНОПКИ
@@ -527,11 +403,12 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     create_user(message.from_user.id, message.from_user.username or "", message.from_user.full_name or "")
     text = (f"👋 <b>Привет, {html.escape(message.from_user.first_name)}!</b>\n\n"
-            f"Добро пожаловать в <b>BotHost v6.0 AI</b> 💎\n\n"
+            f"Добро пожаловать в <b>BotHost v7.0 Ecosystem</b> 💎\n\n"
             f"🚀 <b>Возможности:</b>\n"
             f"• Хостинг Telegram и Discord ботов на Python\n"
             f"• 🧠 <b>ИИ-дебаггер:</b> автоматически ищет ошибки в коде\n"
             f"• ⚙️ <b>Редактор окружения:</b> настройка `.env` прямо в чате\n"
+            f"• 🔄 <b>Авто-рестарт:</b> авто-поднятие бота при падении\n"
             f"• 📦 Распаковка `.zip` архивов и автоустановка библиотек")
     await message.answer(text, reply_markup=main_menu_kb(message.from_user.id), parse_mode="HTML")
 
@@ -549,6 +426,7 @@ async def handle_files(message: types.Message, state: FSMContext):
     ext = fname.lower().split('.')[-1]
     curr_state = await state.get_state()
 
+    # 1. ДОБАВЛЕНИЕ ФАЙЛА К БОТУ
     if curr_state == AddFileStates.waiting_file.state:
         data = await state.get_data(); target_bid = data.get("target_bid"); b = get_bot(target_bid)
         if not b or (b[1] != uid and not is_admin(uid)):
@@ -569,6 +447,7 @@ async def handle_files(message: types.Message, state: FSMContext):
         except Exception as e: await message.answer(f"❌ Ошибка: {e}")
         await state.clear(); return
 
+    # 2. ВОССТАНОВЛЕНИЕ БД ДЛЯ АДМИНА
     if uid == OWNER_ID and ext == "db" and not curr_state:
         try:
             finfo = await bot.get_file(doc.file_id)
@@ -576,10 +455,11 @@ async def handle_files(message: types.Message, state: FSMContext):
             return await message.answer("✅ <b>База данных успешно восстановлена!</b>", parse_mode="HTML")
         except Exception as e: return await message.answer(f"❌ Ошибка: {e}")
 
+    # 3. ЗАГРУЗКА НОВОГО БОТА
     if not has_active_slot(uid):
         return await message.answer("❌ <b>У тебя нет активного слота!</b>\nКупи слот или активируй промокод.", parse_mode="HTML")
 
-    if ext not in ['py', 'zip']: return await message.answer("❌ Принимаются только файлы <b>.py</b> и <b>.zip</b>", parse_mode="HTML")
+    if ext not in ['py', 'zip', 'txt']: return await message.answer("❌ Принимаются только файлы <b>.py</b> и <b>.zip</b>", parse_mode="HTML")
 
     await state.update_data(file_id=doc.file_id, fname=fname, ext=ext)
     await state.set_state(UploadStates.waiting_token)
@@ -616,7 +496,13 @@ async def handle_token(message: types.Message, state: FSMContext):
     except Exception as e: await msg.edit_text(f"❌ Ошибка развертывания: {e}")
     await state.clear()
 
-# ─── ОПЛАТА И СЛОТЫ ────────────────────────────────────────────
+@dp.callback_query(F.data == "upload")
+async def cb_upload(call: types.CallbackQuery, state: FSMContext):
+    if not has_active_slot(call.from_user.id): return await call.answer("❌ Нет активного слота", show_alert=True)
+    await state.set_state(UploadStates.waiting_file)
+    await call.message.edit_text("📤 <b>Загрузка проекта</b>\n\nОтправь мне <b>.py файл</b> или <b>.zip архив</b>.\n\n📦 <i>Для архивов: авто-поиск main.py и установка requirements.txt!</i>\n\n❌ Отмена: /cancel", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Отмена", callback_data="back_main")]]), parse_mode="HTML")
+
+# ─── ОПЛАТА И СЛОТЫ (С ИНТЕГРАЦИЕЙ ИИ КАССИРА) ─────────────────
 
 @dp.callback_query(F.data == "buy")
 async def cb_buy(call: types.CallbackQuery, state: FSMContext):
@@ -639,10 +525,12 @@ async def cb_plan(call: types.CallbackQuery):
     text = (f"{p['emoji']} <b>Тариф: {p['name']}</b>\n\n💎 <b>Стоимость:</b> {p['stars']}⭐\n📅 <b>Срок:</b> {p['days']} дней\n\n"
             f"━━━━━━━━━━━━━━━\n<b>Инструкция по оплате:</b>\n"
             f"1️⃣ Нажми «🎁 Отправить подарок»\n2️⃣ Отправь подарок владельцу на нужную сумму\n"
-            f"3️⃣ Вернись и нажми «✅ Я оплатил»")
+            f"3️⃣ Вернись и нажми «✅ Я оплатил» (ручная проверка)\n"
+            f"🤖 Либо нажми <b>Оплатить через ИИ-Кассира</b> для моментальной авто-выдачи!")
     kb = [
         [InlineKeyboardButton(text="🎁 Отправить подарок", url=get_profile_link())],
-        [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"pay_done:{pid}")],
+        [InlineKeyboardButton(text="🤖 Оплатить через ИИ-Кассира ⚡️", url=f"https://t.me/{VERIFIER_BOT_USERNAME}?start={pid}")],
+        [InlineKeyboardButton(text="✅ Я оплатил (Ручная)", callback_data=f"pay_done:{pid}")],
         [InlineKeyboardButton(text="« Назад", callback_data="buy")]
     ]
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
@@ -652,7 +540,7 @@ async def cb_pay_done(call: types.CallbackQuery):
     pid = call.data.split(":")[1]; p = PLANS[pid]; u = call.from_user
     if user_has_pending_request(u.id): return await call.answer("⏳ Твоя прошлая заявка ещё на проверке!", show_alert=True)
     rid = create_payment_request(u.id, u.username or "", u.full_name or "", pid)
-    await call.message.edit_text(f"✅ <b>Заявка #{rid} создана!</b>\nЖди подтверждения администратором.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Меню", callback_data="back_main")]]), parse_mode="HTML")
+    await call.message.edit_text(f"✅ <b>Заявка #{rid} создана!</b>\nЖди подтверждения администратором.\n\n💡 <i>Хочешь моментально? Используй ИИ-Кассира в тарифах!</i>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Меню", callback_data="back_main")]]), parse_mode="HTML")
     try:
         kb_adm = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve:{rid}"), InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{rid}")]])
         await bot.send_message(OWNER_ID, f"💰 <b>Заявка на оплату #{rid}</b>\n\n👤 @{u.username or '—'} (ID: <code>{u.id}</code>)\nТариф: <b>{p['name']}</b> ({p['stars']}⭐)", reply_markup=kb_adm, parse_mode="HTML")
@@ -670,8 +558,6 @@ async def cb_myslots(call: types.CallbackQuery):
         exp = datetime.fromisoformat(s[3])
         text += f"• <b>{PLANS.get(s[2], {}).get('name', s[2])}</b> — до {exp.strftime('%d.%m.%Y %H:%M')}\n"
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💎 Купить ещё", callback_data="buy")],[InlineKeyboardButton(text="« Меню", callback_data="back_main")]]), parse_mode="HTML")
-
-# ─── ПРОМОКОДЫ ДЛЯ ЮЗЕРА ──────────────────────────────────────
 
 @dp.callback_query(F.data == "promo_enter")
 async def cb_promo_enter(call: types.CallbackQuery, state: FSMContext):
@@ -714,9 +600,12 @@ async def cb_bot_detail(call: types.CallbackQuery, state: FSMContext):
         return await call.answer("❌ Доступ запрещен", show_alert=True)
 
     status = "🧊 Заморожен" if b[6] else ("🟢 Работает" if bid in running_bots else "🔴 Остановлен")
+    auto_r_text = "ВКЛ ✅" if b[8] == 1 else "ВЫКЛ ❌"
+
     kb = [
         [InlineKeyboardButton(text="▶️ Запуск", callback_data=f"start:{bid}"), InlineKeyboardButton(text="⏹ Стоп", callback_data=f"stop:{bid}")],
         [InlineKeyboardButton(text="🔄 Перезапуск", callback_data=f"restart:{bid}"), InlineKeyboardButton(text="📄 Логи", callback_data=f"logs:{bid}")],
+        [InlineKeyboardButton(text=f"🔄 Авто-рестарт: {auto_r_text}", callback_data=f"toggle_restart:{bid}")],
         [InlineKeyboardButton(text="📁 Файлы", callback_data=f"files:{bid}"), InlineKeyboardButton(text="⚙️ Окружение (.env)", callback_data=f"envmenu:{bid}")],
         [InlineKeyboardButton(text="🧠 AI Поиск ошибки", callback_data=f"ai:{bid}")],
         [InlineKeyboardButton(text="🗑 Удалить бота", callback_data=f"del:{bid}")]
@@ -728,7 +617,18 @@ async def cb_bot_detail(call: types.CallbackQuery, state: FSMContext):
 
     kb.append([InlineKeyboardButton(text="« Назад", callback_data="mybots" if b[1] == call.from_user.id else "adm_allbots")])
     text = f"🤖 <b>Бот #{bid}</b>\n\n📁 Исходник: <code>{b[2]}</code>\n🚀 Точка входа: <code>{b[7]}</code>\n📊 Статус: <b>{status}</b>"
-    await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
+    
+    try: await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
+    except: await call.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("toggle_restart:"))
+async def cb_toggle_restart(call: types.CallbackQuery):
+    bid = int(call.data.split(":")[1]); b = get_bot(bid)
+    if not b or (b[1] != call.from_user.id and not is_admin(call.from_user.id)): return
+    new_val = 0 if b[8] == 1 else 1
+    toggle_auto_restart(bid, new_val)
+    await call.answer(f"Авто-рестарт {'ВКЛЮЧЕН' if new_val else 'ВЫКЛЮЧЕН'}")
+    await cb_bot_detail(call, None)
 
 @dp.callback_query(F.data.startswith("start:"))
 async def cb_start(call: types.CallbackQuery):
@@ -736,7 +636,7 @@ async def cb_start(call: types.CallbackQuery):
     if not b or b[6]: return await call.answer("🧊 Бот заморожен админом!", show_alert=True)
     await call.answer("⏳ Запуск...")
     if await start_user_bot(bid): await call.message.answer(f"✅ Бот #{bid} запущен!")
-    else: await call.message.answer(f"❌ Ошибка запуска бота #{bid}.")
+    else: await call.message.answer(f"❌ Ошибка запуска бота #{bid}. Проверьте логи.")
 
 @dp.callback_query(F.data.startswith("stop:"))
 async def cb_stop(call: types.CallbackQuery):
@@ -849,7 +749,7 @@ async def cb_help(call: types.CallbackQuery):
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👤 Владелец", url=get_profile_link())],[InlineKeyboardButton(text="« Меню", callback_data="back_main")]]), parse_mode="HTML")
 
 # ═══════════════════════════════════════════════════════════════
-# 👑 ПАНЕЛЬ АДМИНА И GOD MODE
+# 👑 ПАНЕЛЬ АДМИНА И GOD MODE (ОБНОВЛЕННАЯ С ОЧИСТКОЙ И ПОИСКОМ)
 # ═══════════════════════════════════════════════════════════════
 
 @dp.callback_query(F.data == "admin")
@@ -867,14 +767,66 @@ async def cb_admin(call: types.CallbackQuery, state: FSMContext):
 
     kb = [
         [InlineKeyboardButton(text=pay_btn, callback_data="adm_payments"), InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm_promos")],
-        [InlineKeyboardButton(text="🤖 Все боты (God Mode)", callback_data="adm_allbots")],
+        [InlineKeyboardButton(text="🤖 Все боты (God Mode)", callback_data="adm_allbots"), InlineKeyboardButton(text="🔍 Поиск бота", callback_data="adm_searchbot")],
         [InlineKeyboardButton(text="✉️ Написать юзеру в ЛС", callback_data="adm_msguser"), InlineKeyboardButton(text="📢 Рассылка", callback_data="adm_broadcast")],
         [InlineKeyboardButton(text="🚫 Забанить", callback_data="adm_ban"), InlineKeyboardButton(text="✅ Разбанить", callback_data="adm_unban")],
         [InlineKeyboardButton(text="🛡 +Админ", callback_data="adm_addadmin"), InlineKeyboardButton(text="❌ -Админ", callback_data="adm_remadmin")],
-        [InlineKeyboardButton(text="💾 Скачать БД", callback_data="adm_backup"), InlineKeyboardButton(text="🔄 Рестарт ВСЕХ", callback_data="adm_restart_all")],
+        [InlineKeyboardButton(text="💾 Скачать БД", callback_data="adm_backup"), InlineKeyboardButton(text="🧹 Очистка мусора", callback_data="adm_cleanup")],
+        [InlineKeyboardButton(text="🔄 Рестарт ВСЕХ", callback_data="adm_restart_all")],
         [InlineKeyboardButton(text="« В главное меню", callback_data="back_main")]
     ]
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
+
+# ОЧИСТКА МУСОРА (Удаляет пустые папки и зависшие записи)
+@dp.callback_query(F.data == "adm_cleanup")
+async def cb_adm_cleanup(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id): return
+    await call.answer("🧹 Начинаю очистку...")
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT id FROM bots"); db_bots = {r[0] for r in c.fetchall()}
+    
+    deleted_folders = 0
+    deleted_db_entries = 0
+    
+    # 1. Удаляем папки, которых нет в БД
+    if BOTS_DIR.exists():
+        for item in BOTS_DIR.iterdir():
+            if item.is_dir() and item.name.startswith("bot_"):
+                try:
+                    bid = int(item.name.split("_")[1])
+                    if bid not in db_bots:
+                        shutil.rmtree(item, ignore_errors=True)
+                        deleted_folders += 1
+                except: pass
+                
+    # 2. Удаляем записи из БД, если папки нет физически
+    for bid in db_bots:
+        if not (BOTS_DIR / f"bot_{bid}").exists():
+            c.execute("DELETE FROM bots WHERE id = ?", (bid,))
+            deleted_db_entries += 1
+            
+    conn.commit(); conn.close()
+    await call.message.answer(f"✅ <b>Очистка завершена!</b>\n\nУдалено лишних папок: {deleted_folders}\nУдалено мертвых записей в БД: {deleted_db_entries}", parse_mode="HTML")
+
+# ПОИСК БОТА ПО ID
+@dp.callback_query(F.data == "adm_searchbot")
+async def cb_adm_searchbot(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id): return
+    await state.set_state(AdminStates.search_bot)
+    await call.message.edit_text("🔍 <b>Введи ID бота:</b>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="« Назад", callback_data="admin")]]))
+
+@dp.message(AdminStates.search_bot)
+async def adm_searchbot_do(message: types.Message, state: FSMContext):
+    if not message.text.isdigit(): return await message.answer("❌ ID должен состоять из цифр.")
+    bid = int(message.text)
+    b = get_bot(bid)
+    if not b: return await message.answer("❌ Бот с таким ID не найден.")
+    await state.clear()
+    
+    # Перекидываем админа в меню управления этим ботом
+    class FakeCall:
+        def __init__(self, msg, uid): self.message = msg; self.data = f"bot:{bid}"; self.from_user = type('User', (), {'id': uid})
+    await cb_bot_detail(FakeCall(message, message.from_user.id), state)
 
 @dp.callback_query(F.data == "adm_payments")
 async def cb_adm_payments(call: types.CallbackQuery):
@@ -1087,7 +1039,7 @@ async def cb_restart_all(call: types.CallbackQuery):
 @dp.callback_query(F.data == "back_main")
 async def back_main(call: types.CallbackQuery, state: FSMContext):
     if state: await state.clear()
-    await call.message.edit_text(f"✨ <b>BotHost v6.0 AI</b>", reply_markup=main_menu_kb(call.from_user.id), parse_mode="HTML")
+    await call.message.edit_text(f"✨ <b>BotHost v7.0 Ecosystem</b>", reply_markup=main_menu_kb(call.from_user.id), parse_mode="HTML")
 
 # ═══════════════════════════════════════════════════════════════
 # 🎯 ГЛАВНЫЙ ЗАПУСК СЕРВЕРА
@@ -1096,8 +1048,9 @@ async def back_main(call: types.CallbackQuery, state: FSMContext):
 async def main():
     init_db()
     logger.info("=" * 50)
-    logger.info("🤖 BotHost v6.0 Ultimate Успешно Запущен!")
+    logger.info("🤖 BotHost v7.0 Успешно Запущен!")
     logger.info(f"👤 Владелец: {OWNER_ID}")
+    logger.info(f"🔗 Связан с ботом-кассиром: @{VERIFIER_BOT_USERNAME}")
     logger.info("=" * 50)
 
     # Восстановление ботов и фоновые процессы

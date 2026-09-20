@@ -41,7 +41,7 @@ except ImportError:
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8711311188:AAHnhjvLhyYASMxUI-1hLyktHXhSsmYXnww")
 OWNER_ID = int(os.environ.get("OWNER_ID", "8269807543"))
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "ivan_unreal")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "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")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 VERIFIER_BOT_USERNAME = os.environ.get("VERIFIER_BOT", "BotHostoplatiBot") 
 # ID закрытого канала, где сидят оба бота (начинается с -100)

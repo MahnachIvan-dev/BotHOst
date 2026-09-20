@@ -293,7 +293,7 @@ async def analyze_with_groq(logs):
     try:
         response = await groq_client.chat.completions.create(
             messages=[{"role": "system", "content": "Ты опытный Python разработчик BotHost. Найди ошибку в логах. Отвечай кратко на русском в HTML: <b>❓ Проблема:</b> ... <b>📍 Где:</b> ... <b>💡 Решение:</b> ..."}, {"role": "user", "content": f"Лог:\n\n{logs[-2500:]}"}],
-            model="llama-3.1-70b-versatile", temperature=0.2
+            model="llama-3.3-70b-versatile", temperature=0.2
         )
         return response.choices[0].message.content
     except Exception as e: return f"❌ Ошибка нейросети: {e}" # ═══════════════════════════════════════════════════════════════
